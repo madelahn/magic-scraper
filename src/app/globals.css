@@ -24,3 +24,19 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+.card-search-input {
+  @apply bg-slate-700 rounded-md p-2 ;
+}
+
+.card-search-button {
+  @apply bg-blue-600 text-white rounded-md p-2 ml-2 cursor-pointer;
+}
+
+.card-search-results {
+  @apply grid gap-8 grid-cols-1 md:grid-cols-2 lg:grid-cols-4;
+}
+
+.card-search-item {
+  @apply flex flex-col items-center text-center;
+}
