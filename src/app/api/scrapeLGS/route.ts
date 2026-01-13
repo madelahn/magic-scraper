@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { scrapeETB } from "@/scrapeETB";
+import { scrapeAllSites } from "@/lib/scrapeLGS/scrapeAllSites";
 
 export async function POST(request: Request) {
     try {
@@ -10,7 +10,7 @@ export async function POST(request: Request) {
             return NextResponse.json({ error: "card is required" }, { status: 400 });
         }
 
-        const products = await scrapeETB({ card });
+        const products = await scrapeAllSites(card);
 
         return NextResponse.json({ products });
     } catch (error) {
