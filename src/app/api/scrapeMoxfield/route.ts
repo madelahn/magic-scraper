@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { scrapeMoxfield } from '@/lib/scrapeMoxfield';
+import { scrapeMoxfield } from '@/lib/scrapeMoxfield/scrapeMoxfield';
 
 export async function POST(request: Request) {
     try {

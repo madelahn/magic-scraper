@@ -11,41 +11,45 @@ export default function SearchCollection() {
     const [isLoading, setIsLoading] = useState(false);
 
     const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
-        event.preventDefault();
-        const trimmed = url.trim();
-        if (!trimmed) return;
+    event.preventDefault();
+    const trimmed = url.trim();
+    if (!trimmed) return;
 
-        // Extract collection ID from URL
-        const match = trimmed.match(/\/collection\/([a-zA-Z0-9_-]+)/);
-        if (!match) {
-            setError("Invalid Moxfield collection URL");
-            return;
+    const match = trimmed.match(/\/collection\/([a-zA-Z0-9_-]+)/);
+    if (!match) {
+        setError("Invalid Moxfield collection URL");
+        return;
+    }
+
+    const collectionId = match[1];
+    setIsLoading(true);
+    setError("");
+
+    try {
+        const response = await fetch("/api/scrapeMoxfield", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ collectionId }),
+        });
+
+        if (!response.ok) {
+            const message = await response.text();
+            throw new Error(message || "Scrape failed");
         }
 
-        const collectionId = match[1];
-        setIsLoading(true);
-        setError("");
-
-        try {
-            const response = await fetch("/api/scrapeMoxfield", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ collectionId }),
-            });
-
-            if (!response.ok) {
-                const message = await response.text();
-                throw new Error(message || "Scrape failed");
-            }
-
-            const data = (await response.json()) as { cards: MoxfieldCard[] };
-            setResults(data.cards || []);
-        } catch (err) {
-            setError(err instanceof Error ? err.message : "Something went wrong.");
-        } finally {
-            setIsLoading(false);
-        }
-    };
+        const data = (await response.json()) as { cards: MoxfieldCard[] };
+        console.log('Received data:', data);
+        console.log('Number of cards:', data.cards?.length);
+        console.log('First card:', data.cards?.[0]);
+        
+        setResults(data.cards || []);
+    } catch (err) {
+        console.error('Error:', err);
+        setError(err instanceof Error ? err.message : "Something went wrong.");
+    } finally {
+        setIsLoading(false);
+    }
+};
 
     return (
         <div>
