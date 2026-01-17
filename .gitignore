@@ -43,4 +43,7 @@ next-env.d.ts
 /src/generated/prisma
 
 # Database files
-.db
+prima/dev.db
+prisma/dev.db-journal
+*.db
+*.db-journal
