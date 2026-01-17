@@ -6,4 +6,5 @@ export interface MoxfieldCard {
     isFoil: boolean;
     set: string;
     set_name: string;
+    type_line: string; // Make sure this isn't optional
 }
