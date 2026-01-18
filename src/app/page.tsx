@@ -8,14 +8,21 @@ export default function Home() {
         <h1 className="text-5xl font-bold sm:text-6xl">CARD SEARCH</h1>
 
         <div className="flex w-full gap-6 items-center sm:items-start">
+          <Link href="/SearchCollection">
           <button className="button">
-            <Link href="/SearchCollection">Moxfield Collection Search</Link>
+              Moxfield Collection Search
           </button>
+          </Link>
             <Link href="/SearchLGS">
             <button className="button">
               LGS Search
             </button>
             </Link>
+          <Link href="/checkDeck">
+          <button className="button">
+              FC Deck Check
+          </button>
+          </Link>
         </div>
       </main>
     </div>
