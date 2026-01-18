@@ -29,7 +29,7 @@ A web application that allows you to check which cards from your Magic: The Gath
 ### 1. Clone the Repository
 
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/madelahn/magic-scraper.git
 cd magic-scraper
 ```
 
