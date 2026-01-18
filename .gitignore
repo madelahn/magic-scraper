@@ -49,5 +49,5 @@ prisma/dev.db-journal
 *.db-journal
 
 # Seeded Users
-/src/lib/seedUsers.ts
+src/lib/seedUsers.ts
 seedUsers.ts

@@ -17,7 +17,7 @@ export async function scrapeMoxfield({ collectionId }: { collectionId: string })
         let allCards: MoxfieldCard[] = [];
         let pageNumber = 1;
         let hasMorePages = true;
-        const pageSize = 5000; // Keep at 5000 per page
+        const pageSize = 5000;
         
         while (hasMorePages) {
             const apiUrl = `https://api2.moxfield.com/v1/collections/search/${collectionId}?sortType=cardName&sortDirection=ascending&pageNumber=${pageNumber}&pageSize=${pageSize}&playStyle=paperDollars&pricingProvider=cardkingdom`;
@@ -45,7 +45,7 @@ export async function scrapeMoxfield({ collectionId }: { collectionId: string })
                 }
                 
                 const isBasicLand = item.card.type_line?.startsWith('Basic Land');
-                const isToken = item.card.type === "6";
+                const isToken = item.card.type_line?.includes('Token');
                 
                 if (isBasicLand || isToken) {
                     continue;
