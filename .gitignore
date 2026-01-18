@@ -47,3 +47,7 @@ prima/dev.db
 prisma/dev.db-journal
 *.db
 *.db-journal
+
+# Seeded Users
+/src/lib/seedUsers.ts
+seedUsers.ts
