@@ -9,7 +9,7 @@ export default function Home() {
 
         <div className="flex w-full gap-6 items-center sm:items-start">
           <button className="button">
-            <Link href="/SearchCollection">Moxfield Collection Search</Link>
+            <Link href="/checkDeck">Moxfield Friend Collection Search</Link>
           </button>
             <Link href="/SearchLGS">
             <button className="button">

@@ -8,7 +8,7 @@ export default function Header() {
             </h1>
             <nav>
                 <ul className="flex gap-6 text-sm font-bold">
-                    <li><Link href="/SearchCollection">Search Collections</Link></li>
+                    <li><Link href="/checkDeck">Search Friend Collections</Link></li>
                     <li><Link href="/SearchLGS">Search LGS</Link></li>
                 </ul>
             </nav>
