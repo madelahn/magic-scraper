@@ -177,14 +177,14 @@ nvm install 20 # LTS with arm support
 node -v
 
 # Verify npm version:
-npm -v # Should print "11.6.2".
+npm -v
 ```
 
 #### 2. Clone and Set Up Project
 
 ```bash
 cd ~
-git clone <your-repo-url>
+git clone https://github.com/madelahn/magic-scraper.git
 cd magic-scraper
 
 # Install dependencies
