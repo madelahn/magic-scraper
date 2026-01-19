@@ -171,10 +171,10 @@ curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
 \. "$HOME/.nvm/nvm.sh"
 
 # Download and install Node.js:
-nvm install 24
+nvm install 20 # LTS with arm support
 
 # Verify the Node.js version:
-node -v # Should print "v24.13.0".
+node -v
 
 # Verify npm version:
 npm -v # Should print "11.6.2".
