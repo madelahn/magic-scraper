@@ -9,20 +9,15 @@ export async function scrapeDCC({ card }: ScrapeCardProps): Promise<Product[]> {
     const browser = await getBrowser();
     const page = await browser.newPage();
 
-    try {
-        console.log('Navigating to:', url);
-        
+    try {        
         await page.setViewport({ width: 1920, height: 1080 });
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-        
-        console.log('Waiting for products...');
-        
+                
         // Wait for the product list to appear
         try {
             await page.waitForSelector('.js-pagination-result', { timeout: 10000 });
-            console.log('Products found!');
         } catch (e) {
-            console.log('No products found or timeout');
+            console.log('No products found or timeout: ', e);
             return [];
         }
         
@@ -34,8 +29,6 @@ export async function scrapeDCC({ card }: ScrapeCardProps): Promise<Product[]> {
             const productElements = document.querySelectorAll('.js-pagination-result');
             const results: Product[] = [];
             const cardLower = cardName.toLowerCase();
-
-            console.log(`Found ${productElements.length} products`);
 
             productElements.forEach((product) => {
                 try {
@@ -98,7 +91,6 @@ export async function scrapeDCC({ card }: ScrapeCardProps): Promise<Product[]> {
             return results;
         }, card);
 
-        console.log(`Scraped ${products.length} products matching "${card}"`);
         return products;
     } catch (error) {
         console.error('Dungeon Comics scraping failed:', error);
