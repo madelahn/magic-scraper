@@ -33,7 +33,8 @@
       "Bash(grep -r \"middleware\\\\.ts\\\\|middleware\\\\.js\\\\|MIDDLEWARE\" D:HomeworkCodingmagic-scrapernode_modulesnextdistlib --include=*.js -l)",
       "Bash(grep -r \"PROXY_FILENAME\\\\|proxy_filename\\\\|proxy\\\\.ts\" D:HomeworkCodingmagic-scrapernode_modulesnextdistbuild --include=*.js -l)",
       "Bash(grep -rn PROXY_FILENAME D:HomeworkCodingmagic-scrapernode_modulesnextdistbuild --include=*.js)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(npm test:*)"
     ]
   }
 }
