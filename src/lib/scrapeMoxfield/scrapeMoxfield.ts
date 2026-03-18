@@ -4,6 +4,20 @@ import type { MoxfieldCard } from "@/types/moxfield";
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
+function getMoxfieldHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {
+    "User-Agent": USER_AGENT,
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://www.moxfield.com/",
+    "Origin": "https://www.moxfield.com",
+  };
+  if (process.env.MOXFIELD_COOKIE) {
+    headers["Cookie"] = process.env.MOXFIELD_COOKIE;
+  }
+  return headers;
+}
+
 export async function scrapeMoxfield({
   collectionId,
 }: {
@@ -21,7 +35,7 @@ export async function scrapeMoxfield({
     console.log(`Fetching page ${pageNumber}...`);
 
     const response = await fetch(apiUrl, {
-      headers: { "User-Agent": USER_AGENT },
+      headers: getMoxfieldHeaders(),
     });
 
     if (!response.ok) {

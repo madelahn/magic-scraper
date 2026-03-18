@@ -11,10 +11,19 @@ export async function GET(request: Request) {
 
   const apiUrl = `https://api2.moxfield.com/v1/collections/search/${collectionId}?sortType=cardName&sortDirection=ascending&pageNumber=1&pageSize=10&playStyle=paperDollars&pricingProvider=cardkingdom`;
 
+  const headers: Record<string, string> = {
+    'User-Agent': USER_AGENT,
+    'Accept': 'application/json, text/plain, */*',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Referer': 'https://www.moxfield.com/',
+    'Origin': 'https://www.moxfield.com',
+  };
+  if (process.env.MOXFIELD_COOKIE) {
+    headers['Cookie'] = process.env.MOXFIELD_COOKIE;
+  }
+
   try {
-    const response = await fetch(apiUrl, {
-      headers: { 'User-Agent': USER_AGENT },
-    });
+    const response = await fetch(apiUrl, { headers });
 
     const bodyText = await response.text();
     let bodyPreview: unknown;
