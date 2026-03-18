@@ -1,21 +1,19 @@
 import "server-only";
 import type { MoxfieldCard } from "@/types/moxfield";
 
-const USER_AGENT =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
-
-function getMoxfieldHeaders(): Record<string, string> {
-  const headers: Record<string, string> = {
-    "User-Agent": USER_AGENT,
-    "Accept": "application/json, text/plain, */*",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Referer": "https://www.moxfield.com/",
-    "Origin": "https://www.moxfield.com",
-  };
-  if (process.env.MOXFIELD_COOKIE) {
-    headers["Cookie"] = process.env.MOXFIELD_COOKIE;
+async function fetchMoxfield(targetUrl: string): Promise<Response> {
+  const apiKey = process.env.SCRAPINGBEE_API_KEY;
+  if (!apiKey) {
+    throw new Error("SCRAPINGBEE_API_KEY is not set");
   }
-  return headers;
+
+  const scrapingBeeUrl = new URL("https://app.scrapingbee.com/api/v1/");
+  scrapingBeeUrl.searchParams.set("api_key", apiKey);
+  scrapingBeeUrl.searchParams.set("url", targetUrl);
+  scrapingBeeUrl.searchParams.set("render_js", "false");
+  scrapingBeeUrl.searchParams.set("premium_proxy", "true");
+
+  return fetch(scrapingBeeUrl.toString());
 }
 
 export async function scrapeMoxfield({
@@ -34,9 +32,7 @@ export async function scrapeMoxfield({
     const apiUrl = `https://api2.moxfield.com/v1/collections/search/${collectionId}?sortType=cardName&sortDirection=ascending&pageNumber=${pageNumber}&pageSize=${pageSize}&playStyle=paperDollars&pricingProvider=cardkingdom`;
     console.log(`Fetching page ${pageNumber}...`);
 
-    const response = await fetch(apiUrl, {
-      headers: getMoxfieldHeaders(),
-    });
+    const response = await fetchMoxfield(apiUrl);
 
     if (!response.ok) {
       console.error(`Moxfield API returned ${response.status}`);
