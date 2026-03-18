@@ -35,7 +35,10 @@
       "Bash(grep -rn PROXY_FILENAME D:HomeworkCodingmagic-scrapernode_modulesnextdistbuild --include=*.js)",
       "Bash(npx tsc:*)",
       "Bash(npm test:*)",
-      "Bash(grep -rn \"signCookie\\\\|verifyHmac\\\\|from ''@/lib/auth''\\\\|from ''../lib/auth''\\\\|from ''../../lib/auth''\" src/ tests/ --include=\"*.ts\" --include=\"*.tsx\")"
+      "Bash(grep -rn \"signCookie\\\\|verifyHmac\\\\|from ''@/lib/auth''\\\\|from ''../lib/auth''\\\\|from ''../../lib/auth''\" src/ tests/ --include=\"*.ts\" --include=\"*.tsx\")",
+      "mcp__plugin_vercel_vercel__list_teams",
+      "mcp__plugin_vercel_vercel__list_projects",
+      "mcp__plugin_vercel_vercel__get_runtime_logs"
     ]
   }
 }

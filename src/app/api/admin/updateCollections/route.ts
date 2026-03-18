@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { updateAllCollections } from '@/lib/updateCollections';
 
+export const maxDuration = 60;
+
 export async function POST() {
   try {
     await updateAllCollections();
