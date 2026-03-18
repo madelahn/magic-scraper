@@ -1,0 +1,39 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wc:*)",
+      "Bash(grep -E '\\(sk-[a-zA-Z0-9]{20,}|sk_live_[a-zA-Z0-9]+|sk_test_[a-zA-Z0-9]+|ghp_[a-zA-Z0-9]{36}|gho_[a-zA-Z0-9]{36}|glpat-[a-zA-Z0-9_-]+|AKIA[A-Z0-9]{16}|xox[baprs]-[a-zA-Z0-9-]+|-----BEGIN.*PRIVATE KEY|eyJ[a-zA-Z0-9_-]+\\\\.eyJ[a-zA-Z0-9_-]+\\\\.\\)' D:/Homework/Coding/magic-scraper/.planning/codebase/*.md)",
+      "Bash(node:*)",
+      "WebSearch",
+      "Bash($env:Path = \"C:\\\\Users\\\\aatol\\\\.turso;$env:Path\")",
+      "Bash(turso --version)",
+      "Bash(export PATH=\"/c/Users/aatol/.turso:$PATH\")",
+      "Read(//c/Users/aatol/.turso//**)",
+      "Bash(echo 'Not found at .turso' ls /c/Users/aatol/AppData/Local/Microsoft/WinGet/Links/turso*)",
+      "Bash(tursodb --version)",
+      "Bash(tursodb auth:*)",
+      "Read(//c/Users/aatol/**)",
+      "Bash(/dev/null find:*)",
+      "Bash(tursodb --help)",
+      "Bash(cd:*)",
+      "Bash(npm run:*)",
+      "Bash(echo \"=== $transaction ===\")",
+      "Bash(grep -n '\\\\$transaction' src/lib/updateCollections.ts)",
+      "Bash(grep -n 'scrapeMoxfield\\\\|\\\\$transaction' src/lib/updateCollections.ts)",
+      "Bash(sed -i 's/\"\"@libsql\\\\/client\"\": \"\"\\\\^0\\\\.8\\\\.1\"\"/\"\"@libsql\\\\/client\"\": \"\"0.8.1\"\"/' package.json)",
+      "Bash(sed -i 's/\"\"@prisma\\\\/adapter-libsql\"\": \"\"\\\\^6\\\\.15\\\\.0\"\"/\"\"@prisma\\\\/adapter-libsql\"\": \"\"6.15.0\"\"/' package.json)",
+      "Bash(npx tsx:*)",
+      "Bash(DATABASE_URL=\"file:./dev.db\" npx tsx src/scripts/seed.ts)",
+      "Bash(tursodb dev.db \"SELECT name FROM users;\")",
+      "Bash(ls .planning/phases/03-authentication/*-SUMMARY.md)",
+      "Bash(npx jest:*)",
+      "Bash(npx next:*)",
+      "Bash(grep -r proxy D:HomeworkCodingmagic-scrapernode_modulesnextdistserver --include=*.js -l)",
+      "Bash(grep -r proxy D:HomeworkCodingmagic-scrapernode_modulesnextdist --include=*.js -l)",
+      "Bash(grep -r \"middleware\\\\.ts\\\\|middleware\\\\.js\\\\|MIDDLEWARE\" D:HomeworkCodingmagic-scrapernode_modulesnextdistlib --include=*.js -l)",
+      "Bash(grep -r \"PROXY_FILENAME\\\\|proxy_filename\\\\|proxy\\\\.ts\" D:HomeworkCodingmagic-scrapernode_modulesnextdistbuild --include=*.js -l)",
+      "Bash(grep -rn PROXY_FILENAME D:HomeworkCodingmagic-scrapernode_modulesnextdistbuild --include=*.js)",
+      "Bash(npx tsc:*)"
+    ]
+  }
+}

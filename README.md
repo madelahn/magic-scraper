@@ -164,23 +164,27 @@ Visit `http://localhost:3000/admin` to manually update collections:
 #### 1. Install Node.js on Raspberry Pi
 
 ```bash
-# Update system
-sudo apt update && sudo apt upgrade -y
+# Download and install nvm:
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
 
-# Install Node.js 18
-curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
-sudo apt install -y nodejs
+# in lieu of restarting the shell
+\. "$HOME/.nvm/nvm.sh"
 
-# Verify installation
-node --version
-npm --version
+# Download and install Node.js:
+nvm install 20 # LTS with arm support
+
+# Verify the Node.js version:
+node -v
+
+# Verify npm version:
+npm -v
 ```
 
 #### 2. Clone and Set Up Project
 
 ```bash
 cd ~
-git clone <your-repo-url>
+git clone https://github.com/madelahn/magic-scraper.git
 cd magic-scraper
 
 # Install dependencies

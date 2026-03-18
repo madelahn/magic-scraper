@@ -26,41 +26,43 @@ export async function updateAllCollections() {
       // Show first card as example
       console.log('Example card:', cards[0]);
       
-      // Delete old entries for this user
-      const deleteResult = await prisma.collectionCard.deleteMany({
-        where: { userId: user.id }
+      // Atomic: all three operations commit together or none do
+      await prisma.$transaction(async (tx) => {
+        const deleteResult = await tx.collectionCard.deleteMany({
+          where: { userId: user.id }
+        });
+        console.log(`Deleted ${deleteResult.count} old cards`);
+
+        const createResult = await tx.collectionCard.createMany({
+          data: cards.map(card => ({
+            userId: user.id,
+            cardName: card.name,
+            scryfallId: card.scryfall_id,
+            set: card.set,
+            setName: card.set_name,
+            quantity: card.quantity,
+            condition: card.condition,
+            isFoil: card.isFoil,
+            typeLine: card.type_line,
+          }))
+        });
+        console.log(`Inserted ${createResult.count} new cards`);
+
+        await tx.user.update({
+          where: { id: user.id },
+          data: { lastUpdated: new Date() }
+        });
       });
-      console.log(`Deleted ${deleteResult.count} old cards`);
-      
-      // Insert new entries
-      const createResult = await prisma.collectionCard.createMany({
-        data: cards.map(card => ({
-          userId: user.id,
-          cardName: card.name,
-          scryfallId: card.scryfall_id,
-          set: card.set,
-          setName: card.set_name,
-          quantity: card.quantity,
-          condition: card.condition,
-          isFoil: card.isFoil,
-          typeLine: card.type_line,
-        }))
-      });
-      console.log(`Inserted ${createResult.count} new cards`);
-      
-      // Update user's last updated timestamp
-      await prisma.user.update({
-        where: { id: user.id },
-        data: { lastUpdated: new Date() }
-      });
-      
-      console.log(`✓ Successfully updated ${cards.length} cards for ${user.name}`);
+
+      console.log(`Successfully updated ${cards.length} cards for ${user.name}`);
     } catch (error) {
-      console.error(`✗ Failed to update ${user.name}:`, error);
-      if (error instanceof Error) {
-        console.error('Error details:', error.message);
-        console.error('Stack:', error.stack);
-      }
+      // Transaction rolled back automatically — user's cards are intact
+      const message = `Collection update failed for user "${user.name}" (id: ${user.id}). ` +
+        `No changes were made — the user's cards are intact. ` +
+        `To fix: re-trigger the collection update for this user. ` +
+        `Original error: ${error instanceof Error ? error.message : String(error)}`;
+      console.error(message, error);
+      throw new Error(message);
     }
   }
   
