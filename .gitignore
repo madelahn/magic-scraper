@@ -51,6 +51,6 @@ prisma/dev.db-journal
 # Seeded Users
 src/lib/seedUsers.ts
 seedUsers.ts
-# Turso CLI local artifacts
-auth
-auth-wal
+# Turso CLI local artifacts (rooted to project root, not source paths)
+/auth
+/auth-wal

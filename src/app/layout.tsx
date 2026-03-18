@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Archivo, Archivo_Narrow } from "next/font/google";
 import "./globals.css";
-import Header from "./components/header";
+import ConditionalHeader from "./components/conditional-header";
 
 const archivo = Archivo({
   variable: "--font-archivo",
@@ -28,7 +28,7 @@ children,
       <body
         className={`${archivo.variable} ${archivoNarrow.variable} antialiased lg:px-16`}
       >
-        <Header />
+        <ConditionalHeader />
         {children}
       </body>
     </html>

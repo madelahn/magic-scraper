@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: completed
-stopped_at: Completed 02-02-PLAN.md
-last_updated: "2026-03-17T17:30:46.743Z"
+stopped_at: Completed 03-02-PLAN.md — login page UI and full authentication flow verified
+last_updated: "2026-03-17T20:12:17.807Z"
 last_activity: 2026-03-17 — Phase 2 plan 1 complete (puppeteer → chromium-min + fetch migration)
 progress:
   total_phases: 4
-  completed_phases: 2
-  total_plans: 4
-  completed_plans: 4
+  completed_phases: 3
+  total_plans: 7
+  completed_plans: 7
   percent: 37
 ---
 
@@ -52,6 +52,9 @@ Progress: [████░░░░░░] 37%
 
 *Updated after each plan completion*
 | Phase 02-serverless-browser-migration P02 | 5 | 2 tasks | 3 files |
+| Phase 03-authentication P01 | 12 | 2 tasks | 10 files |
+| Phase 03-authentication P00 | 4 | 2 tasks | 4 files |
+| Phase 03-authentication P02 | 20 | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -73,6 +76,14 @@ Recent decisions affecting current work:
 - [02-01] defaultViewport removed from launchBrowser() — not exported by chromium-min v143 types
 - [Phase 02-02]: Caching partial results (products + failedStores) together so one flaky store does not invalidate the cache entry
 - [Phase 02-02]: maxDuration = 60 exported on scrapeLGS route — explicit Vercel function budget for browser scraping
+- [Phase 03-01]: Admin password checked first in login route so admin users get both session and admin_session cookies
+- [Phase 03-01]: Login route returns JSON redirect field (not NextResponse.redirect) — client fetch must not follow server-side 307 redirect
+- [Phase 03-01]: .gitignore /auth pattern scoped to project root to avoid blocking src/app/api/auth/
+- [Phase 03-00]: jest.config.js used (not .ts) — ts-node not installed, .js avoids the peer dependency
+- [Phase 03-00]: setupFiles runs jest.setup.ts before each test file so env vars are available at module load time
+- [Phase 03-02]: ConditionalHeader uses usePathname('/login') check — avoids per-page layout logic, single wrapper in root layout
+- [Phase 03-02]: Logout is a button (not Link) because it fires a POST fetch before navigating — semantic correctness
+- [Phase 03-02]: Admin page no longer holds password state — proxy cookie (admin_session) is the sole auth gate
 
 ### Pending Todos
 
@@ -87,6 +98,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-17T17:27:36.031Z
-Stopped at: Completed 02-02-PLAN.md
+Last session: 2026-03-17T19:51:43.078Z
+Stopped at: Completed 03-02-PLAN.md — login page UI and full authentication flow verified
 Resume file: None

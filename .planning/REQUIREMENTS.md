@@ -7,10 +7,10 @@
 
 ### Authentication
 
-- [ ] **AUTH-01**: Any visitor is redirected to a login page before accessing any route
-- [ ] **AUTH-02**: Visitor can log in with the shared group password and gain access via httpOnly cookie
-- [ ] **AUTH-03**: Admin routes (`/admin`, `/api/admin/*`) require a separate stronger admin password
-- [ ] **AUTH-04**: User can log out, which clears the session cookie and redirects to login
+- [x] **AUTH-01**: Any visitor is redirected to a login page before accessing any route
+- [x] **AUTH-02**: Visitor can log in with the shared group password and gain access via httpOnly cookie
+- [x] **AUTH-03**: Admin routes (`/admin`, `/api/admin/*`) require a separate stronger admin password
+- [x] **AUTH-04**: User can log out, which clears the session cookie and redirects to login
 
 ### Database
 
@@ -80,10 +80,10 @@
 | SCRP-02 | Phase 2 | Complete |
 | SCRP-03 | Phase 2 | Complete |
 | SCRP-04 | Phase 1 (early) | Complete |
-| AUTH-01 | Phase 3 | Pending |
-| AUTH-02 | Phase 3 | Pending |
-| AUTH-03 | Phase 3 | Pending |
-| AUTH-04 | Phase 3 | Pending |
+| AUTH-01 | Phase 3 | Complete |
+| AUTH-02 | Phase 3 | Complete |
+| AUTH-03 | Phase 3 | Complete |
+| AUTH-04 | Phase 3 | Complete |
 | AUTO-01 | Phase 4 | Pending |
 | AUTO-02 | Phase 4 | Pending |
 | ADMIN-01 | Phase 4 | Pending |

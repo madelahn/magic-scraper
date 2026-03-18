@@ -14,7 +14,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Database Migration** - Replace local SQLite with Turso cloud DB so the app can persist data on Vercel (completed 2026-03-17)
 - [x] **Phase 2: Serverless Browser Migration** - Swap Puppeteer for serverless-compatible Chromium and replace the Moxfield browser scraper with a plain fetch call (completed 2026-03-17)
-- [ ] **Phase 3: Authentication** - Gate all routes behind a shared group password and protect admin routes with a separate admin credential
+- [x] **Phase 3: Authentication** - Gate all routes behind a shared group password and protect admin routes with a separate admin credential (completed 2026-03-17)
 - [ ] **Phase 4: Automation and Deployment** - Add nightly collection sync via Vercel Cron, finalize admin user management, and produce a deployment guide
 
 ## Phase Details
@@ -58,10 +58,12 @@ Plans:
   2. A visitor who enters the correct group password can access all non-admin routes and their session persists across browser sessions
   3. An authenticated user who navigates to an admin route without the admin credential is blocked (not just redirected to login)
   4. An authenticated user who clicks log out is redirected to login and their session cookie is cleared — back-navigation does not restore access
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 03-01: TBD
+- [ ] 03-00-PLAN.md — Wave 0: Install Jest test infrastructure, create test stub files for AUTH-01 through AUTH-04
+- [ ] 03-01-PLAN.md — Auth library (HMAC cookie signing), proxy.ts route protection, login/logout API routes, admin route cleanup, implement unit tests
+- [ ] 03-02-PLAN.md — Login page UI (card layout), header logout link, admin page password field removal
 
 ### Phase 4: Automation and Deployment
 **Goal**: Collections sync automatically every night without admin involvement, admin can manage users without touching seed scripts, and anyone with the guide can deploy the full app from scratch on Vercel free tier
@@ -87,5 +89,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 |-------|----------------|--------|-----------|
 | 1. Database Migration | 2/2 | Complete    | 2026-03-17 |
 | 2. Serverless Browser Migration | 2/2 | Complete    | 2026-03-17 |
-| 3. Authentication | 0/? | Not started | - |
+| 3. Authentication | 3/3 | Complete    | 2026-03-17 |
 | 4. Automation and Deployment | 0/? | Not started | - |
