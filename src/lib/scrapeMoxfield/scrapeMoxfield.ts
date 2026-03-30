@@ -1,19 +1,37 @@
 import "server-only";
+import { fetch as undiciFetch, ProxyAgent } from "undici";
 import type { MoxfieldCard } from "@/types/moxfield";
 
+const USER_AGENT =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+function getMoxfieldHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {
+    "User-Agent": USER_AGENT,
+    Accept: "application/json, text/plain, */*",
+    "Accept-Language": "en-US,en;q=0.9",
+    Referer: "https://www.moxfield.com/",
+    Origin: "https://www.moxfield.com",
+  };
+  if (process.env.MOXFIELD_COOKIE) {
+    headers["Cookie"] = process.env.MOXFIELD_COOKIE;
+  }
+  return headers;
+}
+
 async function fetchMoxfield(targetUrl: string): Promise<Response> {
-  const apiKey = process.env.SCRAPINGBEE_API_KEY;
+  const apiKey = process.env.APIFY_API;
   if (!apiKey) {
-    throw new Error("SCRAPINGBEE_API_KEY is not set");
+    throw new Error("APIFY_API is not set");
   }
 
-  const scrapingBeeUrl = new URL("https://app.scrapingbee.com/api/v1/");
-  scrapingBeeUrl.searchParams.set("api_key", apiKey);
-  scrapingBeeUrl.searchParams.set("url", targetUrl);
-  scrapingBeeUrl.searchParams.set("render_js", "false");
-  scrapingBeeUrl.searchParams.set("premium_proxy", "true");
+  const proxyUrl = `http://auto:${apiKey}@proxy.apify.com:8000`;
+  const dispatcher = new ProxyAgent(proxyUrl);
 
-  return fetch(scrapingBeeUrl.toString());
+  return undiciFetch(targetUrl, {
+    dispatcher,
+    headers: getMoxfieldHeaders(),
+  }) as unknown as Response;
 }
 
 export async function scrapeMoxfield({
