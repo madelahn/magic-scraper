@@ -1,63 +1,26 @@
 import "server-only";
-import https from "node:https";
-import { HttpsProxyAgent } from "https-proxy-agent";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import type { MoxfieldCard } from "@/types/moxfield";
 
-const USER_AGENT =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+const execFileAsync = promisify(execFile);
 
-function getMoxfieldHeaders(): Record<string, string> {
-  const headers: Record<string, string> = {
-    "User-Agent": USER_AGENT,
-    Accept: "application/json, text/plain, */*",
-    "Accept-Language": "en-US,en;q=0.9",
-    Referer: "https://www.moxfield.com/",
-    Origin: "https://www.moxfield.com",
-  };
-  if (process.env.MOXFIELD_COOKIE) {
-    headers["Cookie"] = process.env.MOXFIELD_COOKIE;
-  }
-  return headers;
-}
-
-function httpsGet(url: string, agent: HttpsProxyAgent<string>): Promise<{ status: number; ok: boolean; text: () => string }> {
-  return new Promise((resolve, reject) => {
-    const parsed = new URL(url);
-    const req = https.request(
-      {
-        hostname: parsed.hostname,
-        path: parsed.pathname + parsed.search,
-        headers: getMoxfieldHeaders(),
-        agent,
-      },
-      (res) => {
-        const chunks: Buffer[] = [];
-        res.on("data", (chunk: Buffer) => chunks.push(chunk));
-        res.on("end", () => {
-          const body = Buffer.concat(chunks).toString("utf-8");
-          const status = res.statusCode ?? 0;
-          resolve({
-            status,
-            ok: status >= 200 && status < 300,
-            text: () => body,
-          });
-        });
-      }
-    );
-    req.on("error", reject);
-    req.end();
-  });
-}
-
-async function fetchMoxfield(targetUrl: string) {
-  const proxyPassword = process.env.APIFY_ID;
-  if (!proxyPassword) {
-    throw new Error("APIFY_ID is not set");
-  }
-
-  const proxyUrl = `http://auto:${proxyPassword}@proxy.apify.com:8000`;
-  const agent = new HttpsProxyAgent(proxyUrl);
-  return httpsGet(targetUrl, agent);
+/**
+ * Fetch Moxfield API using curl to bypass Cloudflare TLS fingerprinting.
+ * Node.js fetch/https get blocked (403) because Cloudflare detects their
+ * TLS handshake, but curl's TLS fingerprint is accepted.
+ */
+async function fetchMoxfield(targetUrl: string): Promise<unknown> {
+  const { stdout } = await execFileAsync("curl", [
+    "-s",
+    "-H", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "-H", "Accept: application/json, text/plain, */*",
+    "-H", "Accept-Language: en-US,en;q=0.9",
+    "-H", "Referer: https://www.moxfield.com/",
+    "-H", "Origin: https://www.moxfield.com",
+    targetUrl,
+  ]);
+  return JSON.parse(stdout);
 }
 
 export async function scrapeMoxfield({
@@ -76,14 +39,7 @@ export async function scrapeMoxfield({
     const apiUrl = `https://api2.moxfield.com/v1/collections/search/${collectionId}?sortType=cardName&sortDirection=ascending&pageNumber=${pageNumber}&pageSize=${pageSize}&playStyle=paperDollars&pricingProvider=cardkingdom`;
     console.log(`Fetching page ${pageNumber}...`);
 
-    const response = await fetchMoxfield(apiUrl);
-
-    if (!response.ok) {
-      console.error(`Moxfield API returned ${response.status}`);
-      break;
-    }
-
-    const apiData = JSON.parse(response.text());
+    const apiData = await fetchMoxfield(apiUrl) as { data?: Record<string, unknown> };
 
     if (!apiData || !apiData.data) {
       break;
