@@ -2,6 +2,7 @@
 
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
+import ThemeToggle from "./theme-toggle"
 
 export default function Header() {
   const router = useRouter()
@@ -40,6 +41,9 @@ export default function Header() {
             </li>
           ))}
           <li className="ml-2 pl-2 border-l border-border">
+            <ThemeToggle />
+          </li>
+          <li className="pl-1">
             <button
               onClick={handleLogout}
               className="px-3 py-1.5 rounded-md text-muted hover:text-foreground hover:bg-surface transition-colors cursor-pointer"

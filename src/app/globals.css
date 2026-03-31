@@ -1,6 +1,23 @@
 @import "tailwindcss";
 
+/* Light mode (default) */
 :root {
+  --background: #fafafa;
+  --foreground: #18181b;
+  --muted: #71717a;
+  --surface: #f4f4f5;
+  --surface-hover: #e4e4e7;
+  --border: #e4e4e7;
+  --accent: #4f46e5;
+  --accent-hover: #4338ca;
+  --accent-muted: rgba(79, 70, 229, 0.1);
+  --destructive: #ef4444;
+  --destructive-hover: #dc2626;
+  --success: #22c55e;
+}
+
+/* Dark mode */
+.dark {
   --background: #09090b;
   --foreground: #e4e4e7;
   --muted: #a1a1aa;
