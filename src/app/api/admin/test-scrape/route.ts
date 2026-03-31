@@ -6,7 +6,15 @@ const execFileAsync = promisify(execFile);
 
 export const maxDuration = 30;
 
-async function curlFetch(url: string): Promise<string> {
+async function fetchMoxfield(targetUrl: string): Promise<{ method: string; body: string }> {
+  const scraperApiKey = process.env.SCRAPER_API_KEY;
+
+  if (scraperApiKey) {
+    const proxyUrl = `https://api.scraperapi.com?api_key=${scraperApiKey}&url=${encodeURIComponent(targetUrl)}`;
+    const res = await fetch(proxyUrl);
+    return { method: "scraperapi", body: await res.text() };
+  }
+
   const { stdout } = await execFileAsync("curl", [
     "-s",
     "-H", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -14,9 +22,9 @@ async function curlFetch(url: string): Promise<string> {
     "-H", "Accept-Language: en-US,en;q=0.9",
     "-H", "Referer: https://www.moxfield.com/",
     "-H", "Origin: https://www.moxfield.com",
-    url,
+    targetUrl,
   ]);
-  return stdout;
+  return { method: "curl", body: stdout };
 }
 
 export async function GET(request: Request) {
@@ -26,7 +34,7 @@ export async function GET(request: Request) {
   const targetUrl = `https://api2.moxfield.com/v1/collections/search/${collectionId}?sortType=cardName&sortDirection=ascending&pageNumber=1&pageSize=10&playStyle=paperDollars&pricingProvider=cardkingdom`;
 
   try {
-    const body = await curlFetch(targetUrl);
+    const { method, body } = await fetchMoxfield(targetUrl);
 
     let bodyPreview: unknown;
     try {
@@ -48,7 +56,7 @@ export async function GET(request: Request) {
       bodyPreview = { raw: body.slice(0, 500) };
     }
 
-    return NextResponse.json({ ok: true, body: bodyPreview });
+    return NextResponse.json({ method, ok: true, body: bodyPreview });
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     return NextResponse.json({ error: msg }, { status: 500 });

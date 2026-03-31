@@ -6,11 +6,22 @@ import type { MoxfieldCard } from "@/types/moxfield";
 const execFileAsync = promisify(execFile);
 
 /**
- * Fetch Moxfield API using curl to bypass Cloudflare TLS fingerprinting.
- * Node.js fetch/https get blocked (403) because Cloudflare detects their
- * TLS handshake, but curl's TLS fingerprint is accepted.
+ * Fetch Moxfield API. Uses ScraperAPI in production (Cloudflare blocks
+ * datacenter IPs), falls back to curl locally (residential IPs pass).
  */
 async function fetchMoxfield(targetUrl: string): Promise<unknown> {
+  const scraperApiKey = process.env.SCRAPER_API_KEY;
+
+  if (scraperApiKey) {
+    const proxyUrl = `https://api.scraperapi.com?api_key=${scraperApiKey}&url=${encodeURIComponent(targetUrl)}`;
+    const res = await fetch(proxyUrl);
+    if (!res.ok) {
+      throw new Error(`ScraperAPI returned ${res.status}: ${await res.text()}`);
+    }
+    return res.json();
+  }
+
+  // Local dev fallback: curl bypasses Cloudflare TLS fingerprinting
   const { stdout } = await execFileAsync("curl", [
     "-s",
     "-H", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
