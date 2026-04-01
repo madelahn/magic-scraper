@@ -16,16 +16,16 @@ export default function Home() {
           Search your friends&apos; Moxfield collections or find cards at local game stores.
         </p>
 
-        <div className="flex gap-4 mt-6">
+        <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 mt-6 w-full sm:w-auto">
           <Link
             href="/checkDeck"
-            className="inline-flex items-center rounded-lg bg-accent px-6 py-3 text-base font-medium text-white hover:bg-accent-hover transition-colors"
+            className="inline-flex items-center justify-center rounded-lg bg-accent px-6 py-3 text-base font-medium text-white hover:bg-accent-hover transition-colors"
           >
             Friend Collections
           </Link>
           <Link
             href="/SearchLGS"
-            className="inline-flex items-center rounded-lg border border-border bg-surface px-6 py-3 text-base font-medium text-foreground hover:bg-surface-hover transition-colors"
+            className="inline-flex items-center justify-center rounded-lg border border-border bg-surface px-6 py-3 text-base font-medium text-foreground hover:bg-surface-hover transition-colors"
           >
             LGS Search
           </Link>

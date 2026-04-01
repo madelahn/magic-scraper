@@ -106,7 +106,7 @@ export default function CheckDeck() {
         <textarea
           value={decklist}
           onChange={(e) => setDecklist(e.target.value)}
-          placeholder="1 Lightning Bolt&#10;4 Counterspell&#10;2 Swords to Plowshares&#10;..."
+          placeholder="Lightning Bolt&#10;4 Counterspell&#10;Sol Ring&#10;2 Swords to Plowshares&#10;..."
           className="w-full h-72 p-4 rounded-lg border border-border bg-surface text-foreground font-mono text-sm placeholder:text-muted/40 focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent transition-colors resize-none"
           disabled={isLoading}
         />
@@ -162,8 +162,8 @@ export default function CheckDeck() {
                           key={idx}
                           className="group relative rounded-lg border border-border bg-background p-3 hover:border-accent/40 transition-colors"
                         >
-                          {/* Hover image */}
-                          <div className="hidden group-hover:block fixed z-[9999] pointer-events-none">
+                          {/* Hover image — hidden on touch devices */}
+                          <div className="hidden md:group-hover:block fixed z-[9999] pointer-events-none">
                             <img
                               src={`https://api.scryfall.com/cards/${printing.scryfallId}?format=image`}
                               alt={card.cardName}
@@ -189,12 +189,12 @@ export default function CheckDeck() {
                             {printing.owners.map((owner, ownerIdx) => (
                               <div
                                 key={ownerIdx}
-                                className="flex items-center justify-between text-sm"
+                                className="flex flex-wrap items-center justify-between gap-1 text-sm"
                               >
                                 <span className="font-medium truncate mr-2 text-foreground/80">
                                   {owner.name}
                                 </span>
-                                <div className="flex items-center gap-2 flex-shrink-0">
+                                <div className="flex items-center gap-1.5 flex-shrink-0">
                                   <span className="bg-surface text-muted px-1.5 py-0.5 rounded text-xs font-mono">
                                     x{owner.quantity}
                                   </span>

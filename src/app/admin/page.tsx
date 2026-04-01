@@ -104,18 +104,18 @@ export default function AdminPage() {
             {users.map((user) => (
               <div
                 key={user.id}
-                className="flex items-center justify-between p-3 rounded-lg bg-background border border-border"
+                className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between p-3 rounded-lg bg-background border border-border"
               >
                 <div className="min-w-0">
                   <span className="font-medium">{user.name}</span>
-                  <span className="text-sm text-muted ml-2 font-mono">{user.moxfieldCollectionId}</span>
+                  <span className="block sm:inline text-sm text-muted sm:ml-2 font-mono truncate">{user.moxfieldCollectionId}</span>
                 </div>
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
                     handleDelete(user.id);
                   }}
-                  className={`ml-3 flex-shrink-0 px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer ${
+                  className={`self-end sm:self-auto flex-shrink-0 px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer ${
                     deleteConfirm === user.id
                       ? "bg-destructive text-white"
                       : "bg-destructive/10 text-red-400 hover:bg-destructive/20"

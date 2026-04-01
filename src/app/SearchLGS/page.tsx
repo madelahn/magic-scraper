@@ -47,28 +47,28 @@ export default function SearchLGS() {
 
     return (
         <div className="py-8">
-            <div className="flex items-end justify-between mb-8 pb-6 border-b border-border">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between mb-8 pb-6 border-b border-border">
                 <div>
                     <h1 className="text-3xl">LGS Card Search</h1>
                     <p className="text-muted text-sm mt-1">Search local game store inventory</p>
                 </div>
 
                 <form onSubmit={handleSubmit} className="flex gap-2">
-                    <div className="relative">
+                    <div className="relative flex-1 sm:flex-initial">
                         <input
                             type="text"
                             placeholder="Card name..."
                             value={query}
                             onChange={(event) => setQuery(event.target.value)}
                             disabled={isLoading}
-                            className="w-64 rounded-lg border border-border bg-surface pl-9 pr-3 py-2 text-sm text-foreground placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent transition-colors"
+                            className="w-full sm:w-64 rounded-lg border border-border bg-surface pl-9 pr-3 py-2 text-sm text-foreground placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent transition-colors"
                         />
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted pointer-events-none" />
                     </div>
                     <button
                         type="submit"
                         disabled={isLoading}
-                        className="px-4 py-2 bg-accent text-white text-sm font-medium rounded-lg hover:bg-accent-hover transition-colors disabled:opacity-50 cursor-pointer"
+                        className="flex-shrink-0 px-4 py-2 bg-accent text-white text-sm font-medium rounded-lg hover:bg-accent-hover transition-colors disabled:opacity-50 cursor-pointer"
                     >
                         {isLoading ? "Searching..." : "Search"}
                     </button>
