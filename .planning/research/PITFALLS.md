@@ -1,258 +1,202 @@
-# Domain Pitfalls
+# Pitfalls Research
 
-**Domain:** Next.js + Puppeteer + Prisma + Turso on Vercel (magic-scraper)
-**Researched:** 2026-03-16
-**Confidence:** MEDIUM-HIGH — Vercel/Next.js limits confirmed from official docs; @sparticuz/chromium and Prisma/Turso details from training knowledge (knowledge cutoff August 2025)
+**Domain:** Game tracking, stats dashboard, charting, rate limiting, admin tooling on Next.js + Turso (v1.1)
+**Researched:** 2026-04-09
+**Confidence:** MEDIUM-HIGH — Turso limits confirmed from official sources; charting/rate limiting patterns from multiple credible sources; autocomplete patterns from community consensus.
 
 ---
 
 ## Critical Pitfalls
 
-Mistakes that cause deployment failures, data loss, or complete feature breakage.
+---
+
+### Pitfall 1: Stats Queries Burn Turso Row Reads Without Indexes
+
+**What goes wrong:**
+Aggregation queries for the stats dashboard (win rates per player, deck win rates, screwed rates) will do full table scans on the `games` table. Turso's row-read billing counts every row examined by the query engine — not just rows returned. A `SELECT player, COUNT(*) FROM game_players GROUP BY player` on a 1,000-row table reads 1,000 rows. Running this query on every dashboard page load across 10 users will burn through quota faster than expected.
+
+**Why it happens:**
+SQLite (and Turso by extension) counts row reads at the storage engine level. Developers assume "it's just a small table" and skip indexing. As game history grows, query cost grows linearly with no warning until the monthly quota is hit.
+
+**Consequences:**
+Turso free tier: 500M row reads/month. A stats dashboard with 5 unindexed aggregation queries × 10 users × 100 page loads/day = millions of unnecessary reads/month. At 10k games this becomes meaningful. Hitting the limit disables the database until the next billing cycle.
+
+**How to avoid:**
+1. Add indexes on all columns used in WHERE, GROUP BY, and ORDER BY clauses at schema creation time:
+   ```sql
+   CREATE INDEX idx_game_players_player ON game_players(player_name);
+   CREATE INDEX idx_game_players_winner ON game_players(is_winner);
+   CREATE INDEX idx_games_date ON games(played_at);
+   ```
+2. Consider maintaining pre-computed aggregate columns (running win/loss counters) updated via application logic on each game insert, rather than computing from raw data on each page load.
+3. Cache stats query results in memory or via a simple `lastComputed` timestamp column — recompute at most once per hour rather than per page load.
+
+**Warning signs:**
+Turso dashboard showing row reads climbing disproportionately to game count. Stats page noticeably slower than other pages. Check with `EXPLAIN QUERY PLAN` during development.
+
+**Phase to address:** Game Tracking + Stats Dashboard phase — design schema with indexes before inserting any data. Adding indexes retroactively on Turso requires running the DDL via `turso db shell`.
 
 ---
 
-### Pitfall 1: @sparticuz/chromium + puppeteer Version Mismatch
+### Pitfall 2: Rate Limiting on Vercel Serverless Has No Persistent State
 
-**What goes wrong:** `@sparticuz/chromium` ships a specific Chromium build number. `puppeteer-core` must be on the matching version or the browser launch fails with a protocol error or silent crash. Using full `puppeteer` (not `puppeteer-core`) will cause a double-download of Chromium — the bundled one that can't run on Lambda and the `@sparticuz/chromium` one.
+**What goes wrong:**
+In-memory rate limiting (`const requestCounts = new Map()` at module level) does not work on Vercel serverless. Each function invocation may run in a different Lambda instance. The counter is not shared across instances. A client can exceed any in-memory rate limit simply by having requests land on different instances.
 
-**Why it happens:** `@sparticuz/chromium` versions map directly to Chromium revision numbers, not to puppeteer semver. Developers install the latest of each independently and get a mismatch.
+**Why it happens:**
+Developers test rate limiting locally (single Node.js process, shared memory) and it works perfectly. In production, Vercel scales out to multiple concurrent function instances with no shared state.
 
-**Consequences:** Browser launch throws `Error: Failed to launch the browser process` or `Target closed` immediately. No output. No useful error message without verbose logging.
+**Consequences:**
+The rate limiter provides zero protection in production. Bad actors or accidental loops can hammer scraper routes, burn Vercel function execution time, and trigger Turso write limits.
 
-**Prevention — Version Compatibility Matrix (MEDIUM confidence — verify at install time):**
+**How to avoid:**
+Two viable free-tier options:
 
-| @sparticuz/chromium | puppeteer-core | Chromium Version |
-|---------------------|----------------|-----------------|
-| 133.x               | 22.x           | 133             |
-| 131.x               | 22.x           | 131             |
-| 130.x               | 22.x           | 130             |
-| 127.x               | 22.x           | 127             |
-| 123.x               | 22.x           | 123             |
-| 121.x               | 21.x           | 121             |
+**Option A — Upstash Redis + `@upstash/ratelimit` (recommended):**
+Upstash Redis free tier (10,000 requests/day, 256MB) is sufficient for a 5-10 person friend group app. The `@upstash/ratelimit` library provides sliding window and fixed window algorithms designed for serverless:
+```typescript
+import { Ratelimit } from '@upstash/ratelimit';
+import { Redis } from '@upstash/redis';
 
-**Rule:** `@sparticuz/chromium` major version must equal the Chromium version number. Match it against the `puppeteer-core` entry in https://github.com/puppeteer/puppeteer/blob/main/versions.json. Always pin both packages with exact versions (`"22.x.x"` not `"^22"`).
+const ratelimit = new Ratelimit({
+  redis: Redis.fromEnv(),
+  limiter: Ratelimit.slidingWindow(10, '1 m'),
+});
 
-**Current state:** `package.json` uses `puppeteer: ^24.34.0` (full puppeteer). This must be replaced with `puppeteer-core` at the exact version that matches the chosen `@sparticuz/chromium` release.
-
-**Required install pattern:**
-```bash
-# Remove full puppeteer — it bundles its own Chromium and will exceed bundle size limits
-npm remove puppeteer
-npm install puppeteer-core@<version> @sparticuz/chromium@<matching-version>
+const { success } = await ratelimit.limit(ip);
+if (!success) return new Response('Too Many Requests', { status: 429 });
 ```
+Requires two env vars: `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`.
 
-**Detection:** Run `npx @sparticuz/chromium --version` after install to confirm the bundled Chromium version. Cross-check against puppeteer-core's changelog.
+**Option B — Turso-based rate limiting:**
+Store request counts in a Turso table with timestamps. Works but adds latency and burns row reads/writes for every rate-limited request. Not recommended for scraper routes where latency matters.
 
-**Phase:** Puppeteer migration phase (replace browser.ts).
+**Option C — Vercel WAF (NOT on Hobby tier):**
+Vercel's built-in WAF rate limiting is a Pro/Enterprise feature. Not available on Hobby.
+
+**Warning signs:**
+If you test rate limiting locally and it works but in production requests always succeed regardless of volume, the in-memory approach is being used. Check with concurrent requests from two different browser tabs hitting the same endpoint simultaneously.
+
+**Phase to address:** Rate Limiting phase — set up Upstash before implementing any rate limit logic. Do not attempt in-memory rate limiting and "fix it later."
 
 ---
 
-### Pitfall 2: Vercel Bundle Size Limit Exceeded by Chromium
+### Pitfall 3: Charting Library Bundle Size Blocks Page Load
 
-**What goes wrong:** `@sparticuz/chromium` includes a compressed (~50MB) Chromium binary that expands at runtime. The Vercel serverless function bundle limit is **250MB uncompressed** (confirmed from official Vercel docs). If the scraper route is bundled with Next.js's default output tracing, the Chromium binary pushes the function over the limit and deployment fails.
+**What goes wrong:**
+Adding a full charting library (Recharts ~230KB minified+gzip, Chart.js ~170KB) to the stats page bundles it into the initial JavaScript payload for all pages. Next.js shares the app bundle across routes unless you explicitly code-split.
 
-**Why it happens:** Next.js `outputFileTracingIncludes` must explicitly include the Chromium binary. Without it, the binary is either excluded (launch fails) or included in the wrong bundle context.
+**Why it happens:**
+Importing a chart component at the top of a page file causes Next.js to include the entire charting library in that page's bundle. If the stats page is linked from the main nav, the chart bundle is pre-fetched even when users are on other pages.
 
-**Consequences:** Either `FUNCTION_PAYLOAD_TOO_LARGE` at deploy time, or `Error: ENOENT: chromium binary not found` at runtime.
+**Consequences:**
+First load performance degrades. On a slow connection the stats dashboard feels broken while the large JS bundle parses. Lighthouse score drops. On mobile this is noticeable.
 
-**Prevention:**
-
-1. Never import the scraper from a shared module used by lightweight routes. Isolate the Puppeteer route handler in its own file so Next.js bundles it separately.
-
-2. Add to `next.config.ts`:
+**How to avoid:**
+Always load chart components with Next.js dynamic import and `ssr: false`:
 ```typescript
-experimental: {
-  outputFileTracingIncludes: {
-    '/api/scrape': ['./node_modules/@sparticuz/chromium/**'],
-  },
-}
-```
+import dynamic from 'next/dynamic';
 
-3. The scraper route must use `export const runtime = 'nodejs'` — never `'edge'`. Chromium cannot run in the edge runtime.
-
-4. Set `executablePath` explicitly at runtime:
-```typescript
-import chromium from '@sparticuz/chromium';
-import puppeteer from 'puppeteer-core';
-
-const browser = await puppeteer.launch({
-  args: chromium.args,
-  defaultViewport: chromium.defaultViewport,
-  executablePath: await chromium.executablePath(),
-  headless: chromium.headless,
+const WinRateChart = dynamic(() => import('@/components/WinRateChart'), {
+  ssr: false,
+  loading: () => <div className="h-64 animate-pulse bg-gray-100 rounded" />,
 });
 ```
 
-**Detection:** Check bundle size with `ANALYZE=true next build`. If the scraper function bundle exceeds 200MB, restructure.
+This keeps the charting code out of the initial bundle and loads it only when the stats page is actually visited.
 
-**Phase:** Puppeteer migration phase.
+**Library recommendation:** Recharts is the right choice for this app — ~230KB minified (but splits well with dynamic import), React-native, declarative API, good TypeScript support. Avoid Chart.js (imperative, requires refs), Victory (large), or D3 directly (requires significant custom code for simple bar/pie charts).
+
+**Warning signs:**
+Run `next build` and check the build output. If the stats page bundle is >200KB, charting code is leaking into a shared chunk. Use `ANALYZE=true next build` with `@next/bundle-analyzer` to diagnose.
+
+**Phase to address:** Stats Dashboard phase — use dynamic import from the first component created, not as a retrofit.
 
 ---
 
-### Pitfall 3: Browser Singleton Pattern Breaks in Serverless
+### Pitfall 4: Autocomplete Dropdowns Making API Calls on Every Keystroke
 
-**What goes wrong:** `browser.ts` currently uses a module-level singleton (`let browserInstance: Browser | null = null`). On Vercel serverless, each function invocation may run in a separate isolate. The singleton is not shared between requests. Worse, if the same isolate is reused (warm start), a previously-crashed browser instance is returned as non-null but is unusable, causing `Target closed` errors on subsequent calls.
+**What goes wrong:**
+The game tracking form has autocomplete dropdowns for player names and deck names. Without debouncing, each keystroke fires an API request. For a local list of ~10 players this might seem fine, but it creates unnecessary Turso reads and Vercel function invocations, and causes flickering UI as results arrive out of order.
 
-**Why it happens:** Serverless function instances are ephemeral and stateless. Module-level singletons persist only within a single warm isolate. There is no guarantee that `closeBrowser()` is called before the isolate reuses the instance reference.
+**Why it happens:**
+The `onChange` handler calls `fetch('/api/players?q=...')` directly. No debounce, no caching. With 5 players in the system, 5 keystrokes = 5 API calls.
 
-**Consequences:** Every cold start launches a new browser (expected but slow). Warm starts may get a dead browser reference. Unclosed browser processes during exceptions (noted in CONCERNS.md) cause memory exhaustion and function timeouts.
+**Consequences:**
+For this app's scale (10 players, ~50 decks), the performance impact is minor but the UX suffers from UI flicker and wasted round-trips. If autocomplete is used on every game log entry row in a spreadsheet-style interface, 10 rows × 5 keystrokes = 50 API calls per game entry session.
 
-**Prevention:**
-
-1. Replace the singleton with launch-per-request for the scraper route. The cold start penalty (~2-4 seconds) is unavoidable on serverless; accept it.
-
-2. Always wrap browser operations in try/finally that closes the browser:
+**How to avoid:**
+For a list this small (10 players, 50 decks), the correct approach is to load the full list once at page mount and filter client-side:
 ```typescript
-let browser;
-try {
-  browser = await puppeteer.launch({ ... });
-  // scrape
-} finally {
-  await browser?.close();
-}
+// Fetch once on mount
+const [players, setPlayers] = useState<string[]>([]);
+useEffect(() => {
+  fetch('/api/players').then(r => r.json()).then(setPlayers);
+}, []);
+
+// Filter client-side on input
+const filtered = players.filter(p => p.toLowerCase().includes(query.toLowerCase()));
 ```
 
-3. Do NOT attempt to keep a browser alive across requests on Vercel — the execution model does not support it.
+This eliminates per-keystroke API calls entirely. Only rebuild to server-search if the player list grows beyond ~500 entries (it won't for this use case).
 
-**Detection:** If the scraper works on first call but hangs or errors on second call in the same deploy, the stale singleton pattern is the cause.
+**Warning signs:**
+Network tab in DevTools showing a new XHR request on every keypress in the autocomplete field. Each request visible as a separate row.
 
-**Phase:** Puppeteer migration phase.
+**Phase to address:** Game Tracking phase — design the autocomplete as client-side filtered from the start.
 
 ---
 
-### Pitfall 4: Scraper Function Exceeds Vercel Hobby Timeout
+### Pitfall 5: Schema Design for Game Tracking Gets Normalization Wrong
 
-**What goes wrong:** The 401 Games scraper polling loop runs up to `20 × 5000ms = 100 seconds`. Vercel Hobby functions have a maximum duration of **60 seconds without fluid compute, or 300 seconds with fluid compute** (confirmed from official Vercel docs). The current polling design will reliably exceed the 60s limit on a cold start.
+**What goes wrong:**
+Storing game results in a denormalized single row (`date, player1, player2, player3, player4, winner, screwed`) creates rigid structure that breaks for variable player counts and makes aggregation queries awkward. Storing everything in a JSON blob column avoids schema design but makes SQLite aggregation impossible without application-level processing.
 
-**Why it happens:** The polling loop was written for local development where wall time is unconstrained. Serverless functions have hard timeouts.
+**Why it happens:**
+The "spreadsheet feel" of the UI makes developers model the DB like a spreadsheet: one row per game with fixed columns per player. This works until you have 3-player games, 5-player games, or want to ask "what is each player's win rate across all games they participated in."
 
-**Consequences:** `504 FUNCTION_INVOCATION_TIMEOUT`. The function is killed mid-execution. Any browser process in that isolate is abandoned (not closed). Subsequent warm-start requests may inherit a broken process table.
+**Consequences:**
+A denormalized schema requires rewriting both the schema and all queries the moment the number of players per game varies. A JSON blob requires loading all game data into memory to compute stats, burning Turso row reads on every stats request.
 
-**Specific values (official Vercel docs, confirmed):**
+**How to avoid:**
+Use a normalized two-table design from the start:
+```sql
+-- One row per game session
+games (id, played_at, notes)
 
-| Condition | Default | Maximum |
-|-----------|---------|---------|
-| Hobby, fluid compute ON | 300s | 300s |
-| Hobby, fluid compute OFF | 10s | 60s |
-| Pro, fluid compute ON | 300s | 800s |
-
-Fluid compute is enabled by default on new Vercel projects. Confirm it is ON before relying on 300s. Regardless, 100 seconds of polling inside one function invocation is fragile design.
-
-**Prevention:**
-
-1. Set explicit `maxDuration` on the scraper route:
-```typescript
-export const maxDuration = 60; // or 300 with fluid compute confirmed
+-- One row per player-game participation
+game_players (id, game_id, player_name, deck_name, is_winner, was_screwed)
 ```
 
-2. Replace the polling loop with a shorter, smarter wait. See Pitfall 9 (401 Games scraper) for the root cause fix.
+This structure handles any number of players per game, supports efficient `GROUP BY player_name` aggregations with proper indexes, and allows querying win rates, screwed rates, and deck performance without application-level aggregation.
 
-3. For the Moxfield cron sync, ensure `updateCollections` completes within the budget. With sequential user processing and Puppeteer launch overhead per user, this can easily run long.
+**Warning signs:**
+If the schema has columns like `player1`, `player2`, `player3` — stop and redesign before any data is inserted.
 
-**Detection:** Vercel function logs show `FUNCTION_INVOCATION_TIMEOUT` or the function simply returns 504 without output.
-
-**Phase:** Puppeteer migration phase; Cron sync phase.
+**Phase to address:** Game Tracking phase — critical to get right before the first INSERT. Schema changes on Turso require manual SQL via `turso db shell` (no `prisma migrate deploy`).
 
 ---
 
-### Pitfall 5: Prisma + Turso — Wrong Provider or Missing Adapter
+### Pitfall 6: Cloudflare Bypass via Proxy Is Unreliable If Not Using Render Mode
 
-**What goes wrong:** Prisma does not have native Turso support. It requires the `@prisma/adapter-libsql` driver adapter plus `@libsql/client`. The `schema.prisma` must switch `provider = "sqlite"` to `provider = "sqlite"` with `previewFeatures = ["driverAdapters"]` and the datasource `url` format changes. Forgetting any step causes either `PrismaClientInitializationError` or a silent fallback to the local SQLite file.
+**What goes wrong:**
+Sending a plain HTTP request through ScraperAPI (or similar proxy) bypasses IP-based blocks but does NOT bypass Cloudflare's JavaScript challenge. Cloudflare's bot protection requires JavaScript execution — it presents a challenge page that must run JS to generate a valid cookie. A proxy that just routes traffic without rendering JS will receive the challenge page HTML, not the product listings.
 
-**Why it happens:** The Turso integration is via a driver adapter pattern (not a native Prisma provider), which requires different initialization code than the standard `new PrismaClient()`.
+**Why it happens:**
+ScraperAPI's default `render=false` mode just proxies the HTTP request with rotating IPs. Developers assume "proxy = bypass Cloudflare" but Cloudflare's JS challenge is not IP-based — it's JS execution-based.
 
-**Consequences:** On Vercel, there is no writable filesystem for SQLite. If `DATABASE_URL` points to a local file and the app deploys, Prisma either fails to initialize or creates an empty ephemeral file that disappears between invocations — all data is lost.
+**Consequences:**
+The 401 Games scraper returns the Cloudflare challenge HTML instead of products. The HTML parser finds no `.product-card` elements and returns `[]`. The failure is identical to the current bug — just with an expensive proxy API call added.
 
-**Prevention — Required schema change:**
-```prisma
-generator client {
-  provider        = "prisma-client-js"
-  previewFeatures = ["driverAdapters"]
-}
+**How to avoid:**
+1. Use ScraperAPI with `render=true` (JavaScript rendering mode). This spins up a real headless browser in ScraperAPI's infrastructure, bypasses the JS challenge, and returns the rendered HTML. Costs more API credits but actually works.
+2. Alternatively, use `@sparticuz/chromium` with proper browser fingerprinting — but Vercel's IP ranges are known to Cloudflare and may be pre-blocked regardless.
+3. Add explicit Cloudflare challenge detection: check if the response HTML contains `cf-browser-verification` or `Just a moment` before returning empty results, and throw a typed error.
 
-datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
-}
-```
+**Warning signs:**
+The fetched HTML from 401 Games contains "Just a moment" or "Checking your browser" text. Response time is very fast (<200ms) for a product search that should take >1 second to render.
 
-**Required initialization pattern:**
-```typescript
-import { PrismaClient } from '@prisma/client';
-import { PrismaLibSQL } from '@prisma/adapter-libsql';
-import { createClient } from '@libsql/client';
-
-const libsql = createClient({
-  url: process.env.TURSO_DATABASE_URL!,
-  authToken: process.env.TURSO_AUTH_TOKEN,
-});
-
-const adapter = new PrismaLibSQL(libsql);
-const prisma = new PrismaClient({ adapter });
-```
-
-**Required packages:**
-```bash
-npm install @prisma/adapter-libsql @libsql/client
-npm remove @prisma/adapter-better-sqlite3 better-sqlite3
-```
-
-**Environment variables needed (two, not one):**
-- `TURSO_DATABASE_URL` — format: `libsql://<db-name>-<org>.turso.io`
-- `TURSO_AUTH_TOKEN` — from Turso dashboard
-
-**Detection:** If the app starts without error locally but returns empty results in production, check that `TURSO_DATABASE_URL` is set in Vercel environment variables and is not pointing to a `file:` path.
-
-**Phase:** Database migration phase.
-
----
-
-### Pitfall 6: `prisma migrate` Does Not Work Against Remote Turso DB Directly
-
-**What goes wrong:** `prisma migrate deploy` expects a writable connection it can use to create a `_prisma_migrations` shadow database. Turso's remote HTTP connection does not support this workflow. Attempting to run `prisma migrate deploy` against a `libsql://` URL will fail.
-
-**Why it happens:** Prisma's migration engine uses features (shadow database, `_prisma_migrations` table management) that require direct, low-latency SQL access that Turso's HTTP API does not fully support in the same way as a local SQLite file.
-
-**Consequences:** Migrations cannot be applied to production Turso DB using the standard `prisma migrate deploy` command. If a developer applies schema changes via the normal flow, they get errors and may attempt workarounds that corrupt the migration history.
-
-**Prevention:**
-
-The correct workflow is `prisma migrate diff` + `turso db shell`:
-
-```bash
-# 1. Generate the SQL migration diff
-npx prisma migrate diff \
-  --from-empty \
-  --to-schema-datamodel prisma/schema.prisma \
-  --script > migration.sql
-
-# 2. Apply directly to Turso
-turso db shell <db-name> < migration.sql
-
-# OR use the Turso CLI for remote execution:
-cat migration.sql | turso db shell <db-name>
-```
-
-For incremental schema changes after initial setup, use `--from-local-d1` or `--from-schema-datasource` as the `from` argument depending on which state the DB is already at.
-
-**Detection warning sign:** If you see `Error: P1003: Database <x> does not exist at migration.db` or shadow database errors, you are attempting to run Prisma migrations against Turso directly.
-
-**Phase:** Database migration phase.
-
----
-
-### Pitfall 7: `better-sqlite3` Breaks at Build Time on Vercel
-
-**What goes wrong:** `better-sqlite3` is a native Node.js addon (C++ bindings). Vercel's build environment may not have the correct build tools, or the compiled binary may be for the wrong architecture (x86_64 vs arm64 depending on Vercel's runtime). Additionally, `better-sqlite3` requires a writable filesystem path — which Vercel serverless does not provide.
-
-**Why it happens:** Native addons must be compiled for the target platform. Vercel runs on Amazon Linux (x86_64), and a dev machine may compile for a different target. Even if architecture matches, there is no persistent filesystem to hold the SQLite file.
-
-**Consequences:** Build fails with `Error: Could not locate the bindings file` or deploys successfully but crashes at runtime with `SQLITE_CANTOPEN` when trying to open the DB file.
-
-**Detection:** The deploy log will show native module compilation errors. Check for `.node` file errors in the function bundle.
-
-**Phase:** Database migration phase — resolve before attempting any Vercel deployment.
+**Phase to address:** Scraper Fix phase — verify Cloudflare bypass actually works with a test script before integrating into the Next.js route.
 
 ---
 
@@ -260,291 +204,262 @@ For incremental schema changes after initial setup, use `--from-local-d1` or `--
 
 ---
 
-### Pitfall 8: Auth Middleware Does Not Protect API Routes
+### Pitfall 7: `prisma db push` Schema Drift on New Tables
 
-**What goes wrong:** Next.js middleware runs on the edge runtime. If the middleware checks for a session cookie and redirects unauthenticated users, it protects page routes but **does not prevent direct API route access** unless the API route also performs its own check. Middleware redirect on an API route returns a 307 redirect response that some clients (fetch, curl) will follow, but automated clients may just receive the 307 and still see no real protection.
+**What goes wrong:**
+The project uses `prisma db push` (not `prisma migrate deploy`) because Turso's HTTP protocol is incompatible with Prisma's migration engine. `prisma db push` applies schema changes directly without recording a migration history. Adding new tables (games, game_players) via `db push` in development creates them locally but provides no documented path to apply the same change to the production Turso database.
 
-**Specific concern for this project:** The admin routes (`/api/admin/updateCollections`) are currently completely unprotected. Middleware alone is insufficient — the route handler must independently verify the admin password from the cookie.
+**Why it happens:**
+`prisma db push` is convenient for iteration but does not generate SQL migration files. There is no artifact to apply to production. Developers end up manually diffing the schema or forgetting to apply changes to the production DB.
 
-**Why it happens:** Developers assume middleware is a complete security boundary. It is not — it is only an optimistic pre-filter layer. The Next.js docs explicitly state: "Middleware should not be your only line of defense."
+**Consequences:**
+The app deploys with code that references a `games` table that does not exist in the production Turso database. Every game insert returns a Prisma error. The feature is broken in production but works in local dev.
 
-**Prevention:**
+**How to avoid:**
+Establish a consistent workflow for this project:
+1. Modify `schema.prisma` with new models.
+2. Generate the SQL: `npx prisma migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma --script > migration.sql`
+3. Review the generated SQL.
+4. Apply to production Turso: `turso db shell <db-name> < migration.sql`
+5. Apply locally: `npx prisma db push` (or apply the same SQL to the local dev SQLite file).
 
-1. Every API route handler must perform its own auth check. Do not rely on middleware redirects for API security.
+This creates a documented, repeatable path to production without needing `prisma migrate deploy` support.
 
-2. For the admin routes, the check pattern should be:
+**Warning signs:**
+"Table not found" or `PrismaClientKnownRequestError` with code `P2021` in production logs after adding new models.
+
+**Phase to address:** Game Tracking phase — generate and apply the migration SQL before writing any game insertion code.
+
+---
+
+### Pitfall 8: Vercel Hobby Function Timeout on Scraper Routes (10s Without Fluid Compute)
+
+**What goes wrong:**
+Vercel Hobby default function timeout is 10 seconds when Fluid Compute is off. With Fluid Compute enabled (the new default for new projects), it extends to 300 seconds. The scraper routes need `export const maxDuration = 60` (or higher) set explicitly. If this is missing and Fluid Compute is somehow disabled, scraper routes time out at 10 seconds — not enough to launch Chromium, navigate, and render a page.
+
+**Why it happens:**
+Fluid Compute is enabled by default for new projects created after April 2025, but it can be disabled at the project level. Developers assume the 300s limit and never set `maxDuration` explicitly.
+
+**Consequences:**
+504 FUNCTION_INVOCATION_TIMEOUT on scraper routes in production. Works in development (no timeout). Chromium-based scrapers need 5-15 seconds minimum per request.
+
+**How to avoid:**
+Set explicit `maxDuration` on all scraper route handlers:
 ```typescript
-// In the route handler
-const cookieStore = await cookies();
-const session = cookieStore.get('session');
-if (!session || !verifyAdminToken(session.value)) {
-  return new Response('Unauthorized', { status: 401 });
-}
+export const maxDuration = 60; // seconds — safe for Hobby with Fluid Compute
 ```
+Verify Fluid Compute is enabled in the Vercel project dashboard (Settings → Functions → Fluid Compute).
 
-3. Middleware should use the `matcher` config to exclude `_next/static`, `_next/image`, and API routes if the API routes do their own checking, OR include them if middleware performs the check. Be explicit — the default `matcher` behavior has confused many developers.
+**Warning signs:**
+Scraper returns 504 in production but works locally. Vercel function logs show "FUNCTION_INVOCATION_TIMEOUT."
 
-**Detection:** Use `curl -X POST https://your-app.vercel.app/api/admin/updateCollections` without any cookies. If it returns 200 or processes the request, the route is unprotected.
-
-**Phase:** Authentication phase.
-
----
-
-### Pitfall 9: Plain-Text Password Comparison — Timing Attack
-
-**What goes wrong:** Comparing a submitted password directly against `process.env.GROUP_PASSWORD` using `===` is vulnerable to timing attacks. JavaScript string comparison short-circuits on the first mismatched character, leaking information about how many characters of the password are correct.
-
-**Why it happens:** For a simple shared-password model, developers use `===` as the obvious choice. The attack surface is small for a private friend-group app, but the fix is trivially simple.
-
-**Prevention:** Use `crypto.timingSafeEqual` from Node.js built-ins:
-```typescript
-import { timingSafeEqual } from 'crypto';
-
-function verifyPassword(submitted: string, expected: string): boolean {
-  const a = Buffer.from(submitted);
-  const b = Buffer.from(expected);
-  if (a.length !== b.length) return false;
-  return timingSafeEqual(a, b);
-}
-```
-
-**Phase:** Authentication phase.
+**Phase to address:** Scraper Fix phase.
 
 ---
 
-### Pitfall 10: Cookie Without `secure: true` Leaks Over HTTP
+### Pitfall 9: Admin Sync History Stored in DB Grows Unboundedly
 
-**What goes wrong:** If the session cookie is set without `secure: true`, it will be transmitted over HTTP connections. On Vercel, all traffic is HTTPS, but local development uses HTTP. If `secure: true` is hardcoded, cookies break in local dev. If it is omitted, there is a theoretical leak.
+**What goes wrong:**
+A sync history log table (for "last-updated per user" and "error log per sync") without a pruning strategy accumulates rows forever. With a nightly cron, 1 year = 365 sync log entries. This is trivially small, but if error details are stored as text blobs and the Turso free tier's 5GB storage limit is considered, unbounded growth is still bad practice.
 
-**Prevention:** Set `secure` conditionally:
-```typescript
-secure: process.env.NODE_ENV === 'production'
-```
+**Why it happens:**
+Developers add a logging table, ship it, and never add pruning logic because "it's only 365 rows a year."
 
-This mirrors the pattern in the official Next.js auth docs. The cookie should also always have `httpOnly: true` and `sameSite: 'lax'`.
+**Consequences:**
+The admin sync history UI shows years of history with no way to clear it. Storage grows. Query performance on the log table degrades (though trivially for this scale).
 
-**Phase:** Authentication phase.
+**How to avoid:**
+Design the sync log table with a retention policy from the start:
+- Store only the last N (e.g., 30) sync results per user.
+- Add a `DELETE FROM sync_log WHERE created_at < datetime('now', '-30 days')` at the start of each sync.
+- Or use a fixed-size ring buffer pattern: upsert to a table keyed by `(user_id, run_number % 30)`.
 
----
+**Warning signs:**
+Sync log table row count climbing linearly with no bound. Admin history UI shows 2 years of entries.
 
-### Pitfall 11: Vercel Cron Does Not Retry on Failure
-
-**What goes wrong:** If the nightly Moxfield sync fails (network error, timeout, exception), Vercel does not retry it. The next invocation is the following day. There is no built-in retry, dead-letter queue, or failure notification.
-
-**Confirmed from official Vercel docs:** "Vercel will not retry an invocation if a cron job fails."
-
-**Why it happens:** Developers assume cron systems retry on failure (many do). Vercel's cron is a simple HTTP GET — fire and forget.
-
-**Consequences:** A single transient Moxfield network failure silently causes the collection to be 24+ hours stale. Users see outdated data with no indication of the problem.
-
-**Prevention:**
-
-1. Make the cron handler idempotent (running it twice should have the same result). Confirmed as good practice in Vercel's own cron documentation.
-
-2. Log structured errors at the start and end of the sync so the Vercel function log shows a clear success/failure state.
-
-3. Return a non-2xx status code on failure so the Vercel cron log records the failure visibly (check the Cron Jobs settings page → View Logs).
-
-4. For resilience, consider accepting a manual trigger (the existing admin panel "update collections" button already exists) as the fallback when cron fails.
-
-**Phase:** Cron sync phase.
+**Phase to address:** Admin Tooling phase.
 
 ---
 
-### Pitfall 12: Vercel Cron Hobby Plan — Timing Precision and Scheduling Limits
+### Pitfall 10: Error Alerting on Cron Failure Requires Explicit Implementation
 
-**What goes wrong:** The Hobby plan cron has two hard constraints that differ from every other cron system:
+**What goes wrong:**
+Vercel does NOT send notifications when a cron job's function invocation fails or returns a non-2xx status. The Vercel dashboard "Cron Jobs" page shows invocation history and status, but there is no built-in alert to email or Slack. The nightly sync can silently fail for days without anyone noticing.
 
-1. **Once per day maximum** — any expression that would run more than once per day (e.g., `0 * * * *` for hourly) causes **deployment to fail** with: `Hobby accounts are limited to daily cron jobs`.
+**Why it happens:**
+Developers assume cron systems alert on failure (many managed cron services do). Vercel cron is a simple HTTP scheduler — it fires the request but does not monitor the outcome beyond logging the HTTP status.
 
-2. **±59-minute timing precision** — a cron set for `0 1 * * *` (1:00 AM) will actually fire anywhere between 1:00 AM and 1:59 AM UTC. This is confirmed in official Vercel docs.
+**How to avoid:**
+Two approaches that work on the free tier:
 
-**Consequences:** If someone accidentally writes `0 */6 * * *` (every 6 hours) thinking it looks like a daily schedule, the deployment fails. The `±59-minute` window means the sync does not happen at a precise time — acceptable for this use case.
+**Option A — Self-alert via email from the cron handler:**
+On failure, POST to a free transactional email service (Resend free tier: 3,000 emails/month, or a simple Gmail SMTP call). The cron handler catches exceptions and sends an email before returning a 500.
 
-**Prevention:**
-- Use exactly `0 0 * * *` (midnight UTC) for the nightly sync
-- Never use expressions with multiple values in the hour/minute fields that increase frequency
-- Always timezone-convert manually: UTC midnight = appropriate local times for the friend group
+**Option B — External uptime monitoring:**
+Use a free uptime monitor (UptimeRobot free, Better Uptime free) to make a GET request to a health check endpoint immediately after the expected cron window. If the health check returns stale data, the monitor alerts.
 
-**Detection:** Deployment failure with the message about Hobby limits is the warning sign. No silent failures here — the deploy itself will reject the config.
+Vercel does have an Alerts feature (Observability → Alerts) that can notify on function error spikes via email, Slack, or webhook. This is available on Hobby tier — configure it to alert on failed function invocations for the cron route path.
 
-**Phase:** Cron sync phase.
+**Warning signs:**
+Checking the Vercel Cron logs days after deployment and discovering multiple red (non-2xx) entries that went unnoticed.
 
----
-
-### Pitfall 13: Vercel Cron Endpoint Must Not Redirect
-
-**What goes wrong:** If the cron path (`/api/cron/sync`) returns a redirect (3xx), Vercel does NOT follow it. The cron job is considered complete after the redirect response. The actual sync logic never runs.
-
-**Confirmed from official Vercel docs:** "Cron jobs do not follow redirects."
-
-**Common scenario:** The middleware auth check redirects unauthenticated requests to `/login`. If the cron endpoint path matches the middleware matcher, the cron request (which has no cookie) gets redirected to `/login` and the sync silently does nothing.
-
-**Prevention:**
-
-1. Add the cron path to the middleware matcher exclusion list, OR
-
-2. Verify the cron request using the `CRON_SECRET` environment variable (recommended by Vercel docs), which is automatically sent as `Authorization: Bearer <CRON_SECRET>` on cron invocations:
-```typescript
-export function GET(req: NextRequest) {
-  const auth = req.headers.get('authorization');
-  if (auth !== `Bearer ${process.env.CRON_SECRET}`) {
-    return new Response('Unauthorized', { status: 401 });
-  }
-  // proceed with sync
-}
-```
-
-3. The middleware should check for this `Authorization` header and pass cron requests through.
-
-**Detection:** The Vercel cron logs show a 3xx response code for the invocation. The sync completes in <1ms (impossible for real work).
-
-**Phase:** Authentication phase (middleware design) + Cron sync phase (cron route handler).
+**Phase to address:** Admin Tooling phase — set up alerting before relying on nightly cron in production.
 
 ---
 
-### Pitfall 14: `deleteMany` + `createMany` Without a Transaction Loses Cards
+## Technical Debt Patterns
 
-**What goes wrong:** `updateCollections.ts` deletes all cards for a user then inserts new ones. If the insert fails (Turso write error, network timeout, rate limit), the user has zero cards in the DB. This is already noted in CONCERNS.md. The bug exists in the current code and will be worse with a remote DB that has network latency.
+Shortcuts that seem reasonable but create long-term problems.
 
-**Why it happens:** The code was written for local SQLite where failures mid-operation are rare. Remote databases introduce failure modes that local SQLite never has.
-
-**Consequences:** A failed Moxfield sync leaves a user with an empty collection. The next cron run will attempt to fix it, but until then the deck checker returns no ownership data for that user.
-
-**Prevention:** Wrap in a Prisma transaction:
-```typescript
-await prisma.$transaction(async (tx) => {
-  await tx.collectionCard.deleteMany({ where: { userId } });
-  await tx.collectionCard.createMany({ data: newCards });
-});
-```
-
-Prisma's `$transaction` with the libSQL adapter uses SQLite's `BEGIN TRANSACTION / COMMIT / ROLLBACK` semantics over the Turso HTTP API.
-
-**Phase:** Database migration phase (fix the pattern before migrating, not after).
+| Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
+|----------|-------------------|----------------|-----------------|
+| Storing all game stats in a denormalized single table | Simpler initial queries | Can't efficiently query player/deck win rates; requires rewrite | Never — design normalized from the start |
+| In-memory rate limiting | Zero dependencies, works locally | Provides no protection in production (multi-instance) | Never for production |
+| Importing chart components without dynamic import | Simpler code | Chart library in initial bundle, slows all page loads | Never |
+| Fetching player list on every autocomplete keystroke | Simpler implementation | Unnecessary API calls, flickering UI | Never for small static lists |
+| No retention policy on sync log table | Faster to implement | Unbounded growth, admin UI becomes unusable | Only if log table will be pruned manually by the developer |
+| ScraperAPI without render=true for Cloudflare sites | Cheaper API credits | Returns Cloudflare challenge page, not content | Never for Cloudflare-protected sites |
+| Hardcoding player names in stats logic | Faster to build initial demo | Breaks when players are added; requires code change | Never |
 
 ---
 
-## Minor Pitfalls
+## Integration Gotchas
+
+Common mistakes when connecting to external services.
+
+| Integration | Common Mistake | Correct Approach |
+|-------------|----------------|------------------|
+| Turso + new schema tables | Running `prisma db push` in dev, forgetting to apply changes to production Turso | Generate SQL with `prisma migrate diff`, apply via `turso db shell` |
+| Upstash Redis for rate limiting | Using connection string format instead of REST URL | Upstash Redis on edge/serverless requires REST URL (`UPSTASH_REDIS_REST_URL`), not a redis:// connection string |
+| ScraperAPI for Cloudflare bypass | Using default mode (no JS rendering) | Add `&render=true` parameter to ScraperAPI requests for Cloudflare-protected sites |
+| Recharts in Next.js | SSR rendering chart components that use `window` | Always use `dynamic(() => import(...), { ssr: false })` for chart components |
+| Vercel Cron alerting | Assuming Vercel notifies on failure | Vercel Cron does not alert on failure — implement self-alerting in the cron handler or use Vercel's Observability Alerts |
+| Upstash free tier limits | Not accounting for rate limiter overhead | Each rate limit check costs 1-2 Redis operations; at 10,000/day free limit, a 10-user app has ample headroom |
 
 ---
 
-### Pitfall 15: 401 Games Scraper — Why It Fails Silently
+## Performance Traps
 
-**What goes wrong:** The scraper polls for `.product-card` elements for up to 100 seconds. Looking at the scraper code, the site uses `domcontentloaded` as the wait condition — this fires before JavaScript has executed. The `.product-card` elements are rendered by a JavaScript SPA framework (Shopify's search results page uses JavaScript to inject results). `domcontentloaded` completes when the static HTML is parsed, but the product grid is not yet injected.
+Patterns that work at small scale but fail as usage grows.
 
-**Root causes in order of likelihood:**
-
-1. **Bot detection / Cloudflare challenge:** 401 Games (and most large Canadian MTG retailers) uses Cloudflare. A headless Chromium browser that passes a user-agent string but lacks real browser fingerprinting (WebGL, canvas hash, navigator plugins) triggers Cloudflare's JS challenge or CAPTCHA. The challenge page has no `.product-card` elements — the loop times out returning `[]` with no error.
-
-2. **Wrong wait strategy:** Even when Cloudflare is bypassed, `waitForSelector('.product-card', { timeout: 10000 })` is more reliable than polling manually. The polling loop adds up to 102 seconds of wall time; `waitForSelector` can succeed in 200ms.
-
-3. **Selector staleness:** The selector `.product-card` may have changed. Shopify-based stores frequently update their theme CSS classes.
-
-**Warning signs (from the actual code):**
-- Console log `'Products never appeared after 20 seconds'` is printed but the function returns `[]` — the caller has no way to distinguish "no results" from "scraper failed"
-- All errors are caught and return `[]` — failures are invisible
-
-**Prevention for fixing the scraper:**
-
-1. Test with `networkidle0` instead of `domcontentloaded` to ensure the JS app has loaded
-2. Add a `page.waitForSelector('.product-card', { timeout: 15000 })` after navigation
-3. Check whether the page HTML contains a Cloudflare challenge (`cf-browser-verification` in the DOM) and throw a specific error rather than timing out silently
-4. Consider whether a Vercel serverless environment with `@sparticuz/chromium` will even bypass Cloudflare — the IP range is known and often pre-blocked
-
-**Phase:** 401 Games scraper fix phase.
+| Trap | Symptoms | Prevention | When It Breaks |
+|------|----------|------------|----------------|
+| Unindexed GROUP BY on game_players | Stats page slow, Turso row reads spike | Index player_name, is_winner columns before inserting data | ~500 games (noticeable), ~5,000 games (slow) |
+| Full stats recompute on every page load | Dashboard slow for multiple concurrent users | Cache computed stats with a TTL or trigger recompute on game insert | ~100 games × 5 concurrent users |
+| Loading entire game history for client-side chart rendering | Large JSON payload sent to browser | Aggregate server-side, send only summary data to charts | ~1,000 games |
+| Fetching all decks for autocomplete via API on each form row | Many API calls per game entry session | Load player/deck lists once at page mount, filter client-side | Immediate, even at 10 players |
+| Sync log table with no pruning | Admin history page loads slowly | Add DELETE pruning at start of each sync | ~10,000 rows (noticeable), ~100,000 rows (slow) |
 
 ---
 
-### Pitfall 16: All Scrapers Catch Errors and Return `[]`
+## Security Mistakes
 
-**What goes wrong:** `scrapeETB`, `scrapeDCC`, `scrapeFTF`, and `scrape401` all catch any error and return an empty array. A changed CSS selector, a network timeout, a rate limit, or a Cloudflare block all produce the same output as "no results for this card". Users see an empty results section with no indication of failure.
+Domain-specific security issues beyond general web security.
 
-**Prevention:**
-
-1. Return a typed result that distinguishes success from failure:
-```typescript
-type ScrapeResult =
-  | { ok: true; products: Product[] }
-  | { ok: false; error: string; products: [] }
-```
-
-2. Log the specific error and store scrape metadata (timestamp, success/fail, item count) so admin visibility is possible.
-
-**Phase:** Error visibility should be addressed during the Puppeteer migration phase — the scraper code will be rewritten anyway.
+| Mistake | Risk | Prevention |
+|---------|------|------------|
+| Rate limiting only on scraper routes, not on auth routes | Password brute-force on the login endpoint | Apply rate limiting to `/api/auth/*` routes as a priority — this is the highest-value target |
+| Logging full player/deck names in function logs | Vercel function logs are visible to anyone with Vercel dashboard access (just the developer for this app, but worth noting) | Acceptable for a private friend-group app; no PII involved |
+| Admin endpoints returning full sync error messages | Error messages may expose internal structure (DB schema, API keys in stack traces) | Sanitize error responses: log full error server-side, return generic message to client |
+| Game data queryable without auth | Any game history is visible without login | Apply the same auth check (cookie verification) to all `/api/games/*` routes — same pattern as existing routes |
 
 ---
 
-### Pitfall 17: `DATABASE_URL` Misconfiguration Creates Empty DB Silently
+## UX Pitfalls
 
-**What goes wrong:** If `TURSO_DATABASE_URL` is absent or malformed in the Vercel environment, and the initialization code falls back to checking `DATABASE_URL`, Prisma may attempt to open a local SQLite file at `file:./dev.db`. Vercel will create this file in the ephemeral Lambda filesystem. The app appears to work (no crash) but all DB reads return empty and writes are discarded when the instance recycles.
+Common user experience mistakes in this domain.
 
-**Prevention:**
-
-1. Validate environment variables at startup:
-```typescript
-if (!process.env.TURSO_DATABASE_URL || !process.env.TURSO_AUTH_TOKEN) {
-  throw new Error('Missing required Turso environment variables');
-}
-```
-
-2. Name the variables distinctly (`TURSO_DATABASE_URL`, not `DATABASE_URL`) so a missing Vercel env var does not accidentally use the dev SQLite path.
-
-**Phase:** Database migration phase.
+| Pitfall | User Impact | Better Approach |
+|---------|-------------|-----------------|
+| Requiring exact player name spelling in game entry | Typos create ghost players ("Alice" vs "alice" vs "Aliice") in stats | Autocomplete from the canonical player list; normalize to lowercase on insert |
+| Showing raw win counts instead of win rates on stats dashboard | "Alice has 50 wins" is meaningless without knowing how many games she played | Always show win rate (wins / games played) as the primary metric; show raw counts as secondary |
+| Stats dashboard with no "minimum games" filter | A player who played 1 game and won appears to have a 100% win rate | Filter out players/decks with fewer than N games (e.g., 3) from win rate charts, or show a confidence indicator |
+| Spreadsheet-style game entry with no confirmation step | Accidental game submissions with wrong data are hard to undo | Add a simple review step or allow editing the most recent game |
+| Showing "No data yet" on stats dashboard before first game | Users don't know if the feature is working or broken | Show a clear "Log your first game to see stats" empty state with a link to the game logging form |
 
 ---
 
-### Pitfall 18: Prisma Client Not Regenerated After Schema Change
+## "Looks Done But Isn't" Checklist
 
-**What goes wrong:** When the `schema.prisma` changes (adding `previewFeatures = ["driverAdapters"]`, changing the datasource), the Prisma client must be regenerated. Vercel's build step runs `next build`, which does not automatically run `prisma generate`. The deployed function uses the old client, which does not have the libSQL adapter support.
+Things that appear complete but are missing critical pieces.
 
-**Prevention:** Add `prisma generate` to the build script:
-```json
-"scripts": {
-  "build": "prisma generate && next build"
-}
-```
-
-**Phase:** Database migration phase.
+- [ ] **Rate limiting:** Works in local dev (single instance) — verify it actually blocks requests when tested with concurrent calls against the deployed Vercel URL
+- [ ] **Cloudflare bypass:** ScraperAPI call returns 200 — verify the response HTML actually contains product listings, not a Cloudflare challenge page
+- [ ] **Game tracking schema:** Schema looks right in local dev — verify `turso db shell` shows the tables exist in the production database before merging
+- [ ] **Stats charts:** Charts render with seed data — verify they handle zero-game state, single-game state, and all-tied state gracefully
+- [ ] **Autocomplete:** Player dropdown works — verify it correctly handles players whose names are substrings of other player names
+- [ ] **Sync history:** Last-updated timestamps display — verify they update correctly after a cron run (check actual Turso data, not just the UI)
+- [ ] **Error alerting:** Alert email/webhook configured — verify by triggering a deliberate cron failure and confirming the alert fires
+- [ ] **Admin Moxfield ID edit:** Edit form saves — verify the saved ID is actually used on the next sync, not the cached old value
 
 ---
 
-## Phase-Specific Warnings
+## Recovery Strategies
 
-| Phase Topic | Likely Pitfall | Mitigation |
-|-------------|---------------|------------|
-| Replace `puppeteer` with `puppeteer-core` + `@sparticuz/chromium` | Version mismatch (Pitfall 1), bundle size (Pitfall 2) | Pin exact versions; check Sparticuz README at install time |
-| Browser initialization in serverless | Stale singleton (Pitfall 3) | Launch-per-request with try/finally close |
-| Function timeout for long scrapes | Timeout exceeded (Pitfall 4) | Add `maxDuration` export; fix 401 Games polling loop |
-| Migrate `schema.prisma` from SQLite to Turso | Wrong provider/adapter (Pitfall 5) | Use `@prisma/adapter-libsql` driver adapter pattern |
-| Run migrations against Turso | `prisma migrate deploy` fails (Pitfall 6) | Use `prisma migrate diff --script` + `turso db shell` |
-| Remove `better-sqlite3` | Build failure on Vercel (Pitfall 7) | Remove before deploying; it has no serverless use |
-| Add transaction to collection update | Data loss on failure (Pitfall 14) | `prisma.$transaction` before migrating |
-| Implement session cookie auth | Middleware not protecting API routes (Pitfall 8), timing attacks (Pitfall 9) | Check in every route handler; use `timingSafeEqual` |
-| Implement Vercel Cron | No retry on failure (Pitfall 11), Hobby once-per-day limit (Pitfall 12), redirect skip (Pitfall 13) | Return non-2xx on failure; use `CRON_SECRET` auth; exclude cron path from middleware redirect |
-| Fix 401 Games scraper | Bot detection, wrong wait strategy (Pitfall 15) | Test Cloudflare bypass first; use `waitForSelector`; improve error visibility |
-| Environment variable setup | Silent empty DB (Pitfall 17), stale Prisma client (Pitfall 18) | Validate at startup; add `prisma generate` to build script |
+When pitfalls occur despite prevention, how to recover.
+
+| Pitfall | Recovery Cost | Recovery Steps |
+|---------|---------------|----------------|
+| Stats queries burning Turso row reads | LOW | Add indexes via `turso db shell`, add result caching; no data loss |
+| Game schema designed wrong (denormalized) | HIGH | Requires schema migration, data migration script, rewrite of all query logic; do it before any real data is entered |
+| Rate limiting not working in production | LOW | Remove in-memory code, add Upstash Redis; no data loss |
+| Cloudflare bypass not working (proxy without render) | LOW | Switch ScraperAPI to `render=true` mode or add FlareSolverr; scraper was already broken |
+| Chart bundle in initial payload | LOW | Add dynamic import wrapper around chart components; no data loss |
+| Schema not applied to production Turso DB | LOW | Run `turso db shell < migration.sql`; takes minutes |
+| Sync log table unbounded growth | LOW | Add `DELETE FROM sync_log WHERE ...` and run it manually once to clear old entries |
+
+---
+
+## Pitfall-to-Phase Mapping
+
+How roadmap phases should address these pitfalls.
+
+| Pitfall | Prevention Phase | Verification |
+|---------|------------------|--------------|
+| Unindexed stats aggregation burning Turso reads | Game Tracking (schema design) | Run `EXPLAIN QUERY PLAN` on all stats queries; check Turso dashboard row reads after 10 test games |
+| In-memory rate limiting (no-op in production) | Rate Limiting phase | Test with two concurrent requests to the deployed URL; both should be limited |
+| Chart library in initial bundle | Stats Dashboard phase | Check `next build` output; stats page bundle should be under 50KB without the chart library |
+| Autocomplete making per-keystroke API calls | Game Tracking phase | Open Network tab during game entry; no requests should fire on typing if list is small |
+| Denormalized game schema | Game Tracking phase (day 1) | Query `SELECT player_name, COUNT(*) FROM game_players GROUP BY player_name` — must work without app-level aggregation |
+| Cloudflare bypass via non-rendering proxy | Scraper Fix phase | Log raw response HTML from ScraperAPI; must contain product listings, not "Just a moment" |
+| `prisma db push` schema drift to production | Game Tracking phase | Check production Turso via `turso db shell` before deploying game tracking code |
+| Cron failure with no alerting | Admin Tooling phase | Deliberately return a 500 from the cron route and verify an alert is received |
+| Admin sync log growing unboundedly | Admin Tooling phase | Verify DELETE/pruning logic runs on each cron invocation |
 
 ---
 
 ## Sources
 
-**Confirmed from official Vercel documentation (HIGH confidence):**
-- Vercel Function Limits: https://vercel.com/docs/functions/limitations — bundle size 250MB uncompressed, memory 2GB Hobby, max duration 300s (fluid compute) / 60s (no fluid compute)
-- Vercel Cron: https://vercel.com/docs/cron-jobs — no redirects, CRON_SECRET pattern
-- Vercel Cron Management: https://vercel.com/docs/cron-jobs/manage-cron-jobs — no retry on failure, idempotency guidance
-- Vercel Cron Pricing: https://vercel.com/docs/cron-jobs/usage-and-pricing — Hobby = once/day, ±59min precision
-- Next.js Authentication Guide: https://nextjs.org/docs/app/guides/authentication — cookie options, stateless session pattern, middleware as optimistic-only check
-- Next.js cookies() API: https://nextjs.org/docs/app/api-reference/functions/cookies — async API, set/delete restrictions, streaming interaction
+**Turso free tier limits (MEDIUM confidence — confirmed from multiple sources, March 2025 pricing update):**
+- Turso pricing: https://turso.tech/pricing — 500M row reads/month, 10M row writes/month, 5GB storage on free tier
+- Turso billing tips: https://turso.tech/blog/tips-for-maximizing-your-turso-billing-allowances-48a0fca163e9
+- Turso billing docs: https://docs.turso.tech/help/usage-and-billing
 
-**From training knowledge (MEDIUM confidence — verify current versions):**
-- @sparticuz/chromium version compatibility with puppeteer-core: https://github.com/Sparticuz/chromium (README)
-- Prisma + Turso adapter pattern: https://www.prisma.io/docs/orm/overview/databases/turso
-- `prisma migrate diff` for Turso: Prisma migration docs
+**Vercel serverless rate limiting (HIGH confidence — multiple official and authoritative sources):**
+- Vercel knowledge base on rate limiting: https://vercel.com/kb/guide/add-rate-limiting-vercel
+- Upstash ratelimit guide: https://upstash.com/blog/edge-rate-limiting
+- Upstash ratelimit library: https://github.com/upstash/ratelimit-js
 
-**From direct codebase analysis (HIGH confidence — exact file locations):**
-- `src/lib/scrapeLGS/browser.ts` — singleton pattern confirmed
-- `src/lib/scrapeLGS/scrape401.ts` — polling loop, 100s max runtime, silent error swallowing confirmed
-- `prisma/schema.prisma` — `provider = "sqlite"`, no `driverAdapters` preview feature
-- `package.json` — `puppeteer: ^24.34.0` (full puppeteer, not puppeteer-core), `@prisma/adapter-better-sqlite3`
-- `.planning/codebase/CONCERNS.md` — transaction atomicity gap, browser lifecycle fragility confirmed
+**Vercel function limits (HIGH confidence — official Vercel docs):**
+- Function limitations: https://vercel.com/docs/functions/limitations
+- Fluid compute: https://vercel.com/docs/fluid-compute
+
+**Vercel cron alerting (MEDIUM confidence — confirmed from Vercel docs):**
+- Vercel alerts: https://vercel.com/docs/alerts
+- Vercel cron troubleshooting: https://vercel.com/kb/guide/troubleshooting-vercel-cron-jobs
+
+**Charting library bundle size (MEDIUM confidence — bundlephobia data + multiple community sources):**
+- Recharts bundlephobia: https://bundlephobia.com/package/recharts
+- Recharts GitHub (bundle size issue thread): https://github.com/recharts/recharts/issues/1417
+
+**Cloudflare bypass (MEDIUM confidence — from ScraperAPI docs and community research):**
+- ScraperAPI Cloudflare bypass: https://www.scraperapi.com/solutions/bypass-cloudflare/
+- ScrapeOps Cloudflare bypass guide: https://scrapeops.io/web-scraping-playbook/how-to-bypass-cloudflare/
+
+**Prisma + Turso migration workflow (MEDIUM confidence — from official Prisma docs and community):**
+- Prisma Turso docs: https://www.prisma.io/docs/orm/overview/databases/turso
+- Running migrations with Turso: https://www.unwrapdesign.com/blog/turso-prisma-migrations
+
+---
+*Pitfalls research for: v1.1 game tracking, stats dashboard, rate limiting, admin tooling on Next.js + Turso*
+*Researched: 2026-04-09*

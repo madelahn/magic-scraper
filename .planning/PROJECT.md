@@ -33,12 +33,27 @@ Friends can instantly see who in the group owns any card from a decklist, and ch
 
 ### Active
 
-- [ ] Fix 401 Games scraper — currently disabled; likely Cloudflare-blocked from Vercel IPs
+- [ ] Game tracking system — spreadsheet-style input (date, players, winner, screwed, winner deck)
+- [ ] Autocomplete dropdowns with shared player list and separate deck list
+- [ ] Stats dashboard — win rates, screwed rates, deck winrates, graphs, pie charts
+- [ ] Seed player list from existing Moxfield users (optional, allow new players too)
+- [ ] Fix 401 Games scraper — proxy/Cloudflare bypass
 - [ ] Rate limiting on API routes — protect against abuse
+- [ ] Scraper error handling hardening — retry logic, better failure modes
 - [ ] Admin can edit existing user's Moxfield collection ID
 - [ ] Admin can view sync history / last-updated timestamps per user
 - [ ] Error alerting when nightly cron sync fails
-- [ ] Scraper health dashboard showing which stores return results vs fail
+- [ ] Scraper health dashboard with logging
+
+## Current Milestone: v1.1 Game Tracking & Polish
+
+**Goal:** Add a game tracking system with stats dashboard, harden existing scrapers and add rate limiting, and improve admin tooling.
+
+**Target features:**
+- Game tracking with spreadsheet-style input and autocomplete dropdowns
+- Stats dashboard with visualizations (bar graphs, pie charts, win/screwed rates)
+- 401 Games scraper fix, rate limiting, scraper hardening
+- Admin improvements: edit Moxfield IDs, sync history, error alerting, health dashboard
 
 ### Out of Scope
 
@@ -79,5 +94,22 @@ Friends can instantly see who in the group owns any card from a decklist, and ch
 | Collection update in Prisma transaction | Prevents partial data loss during deleteMany + createMany | ✓ Good — atomic operations |
 | maxDuration=300 on cron route | Fluid Compute budget for multi-user sync | ✓ Good — sufficient for current user count |
 
+## Evolution
+
+This document evolves at phase transitions and milestone boundaries.
+
+**After each phase transition** (via `/gsd-transition`):
+1. Requirements invalidated? → Move to Out of Scope with reason
+2. Requirements validated? → Move to Validated with phase reference
+3. New requirements emerged? → Add to Active
+4. Decisions to log? → Add to Key Decisions
+5. "What This Is" still accurate? → Update if drifted
+
+**After each milestone** (via `/gsd-complete-milestone`):
+1. Full review of all sections
+2. Core Value check — still the right priority?
+3. Audit Out of Scope — reasons still valid?
+4. Update Context with current state
+
 ---
-*Last updated: 2026-04-08 after v1.0 milestone*
+*Last updated: 2026-04-09 after v1.1 milestone start*

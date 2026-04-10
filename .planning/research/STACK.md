@@ -1,650 +1,285 @@
-# Technology Stack
+# Stack Research
 
-**Project:** magic-scraper — Vercel deployment milestone
-**Researched:** 2026-03-16
-**Confidence note:** Web search and WebFetch were unavailable in this session. All findings are from
-training data (cutoff August 2025) cross-checked against known package release histories and official
-API surfaces. Confidence levels are assigned honestly. Verify pinned versions against npm before
-installing.
+**Domain:** MTG game tracking / stats dashboard additions to existing Next.js 16 + React 19 + Tailwind v4 app
+**Researched:** 2026-04-09
+**Confidence:** MEDIUM-HIGH (all charting/combobox claims verified via web search against npm and GitHub; rate limiting approach verified against multiple sources)
 
 ---
 
-## Recommended Stack
+## Context: What Already Exists (Do Not Re-Research)
 
-### Changes From Current Stack
+| Technology | Version | Status |
+|------------|---------|--------|
+| Next.js | ^16.1.6 | Installed, deployed |
+| React | 19.2.3 | Installed |
+| Tailwind CSS | ^4 | Installed |
+| Prisma + @prisma/adapter-libsql | ^6.15.0 | Installed, Turso-connected |
+| @libsql/client | 0.8.1 | Installed |
+| lucide-react | ^0.562.0 | Installed (icons) |
+| HMAC cookie auth | — | Hand-rolled, working |
+| Vercel Cron | — | Configured, daily sync running |
 
-The current stack uses `better-sqlite3` + `@prisma/adapter-better-sqlite3` against a local SQLite
-file. The deployment milestone requires four targeted changes:
-
-| Current | Replacement | Reason |
-|---------|-------------|--------|
-| `better-sqlite3` | `@libsql/client` + `@prisma/adapter-libsql` | Turso is libSQL over HTTP — better-sqlite3 is a native binding that requires a local file and won't work on Vercel |
-| `puppeteer` (full) | `puppeteer-core` + `@sparticuz/chromium` | Full Puppeteer bundles a Chromium binary (~170 MB) that exceeds Vercel's 50 MB function limit; @sparticuz/chromium is a stripped Chromium built for AWS Lambda / Vercel |
-| No auth | httpOnly cookie (hand-rolled) | Simple shared-password gate for a closed friend group; no auth library needed |
-| No cron | Vercel Cron via `vercel.json` | Free Hobby tier supports 1 daily cron job |
+shadcn/ui is NOT currently installed. The project uses custom Tailwind classes (`bg-surface`, `bg-background`, `border-border`, `text-muted`, `text-accent`) defined in globals.css — the project has its own design token system. This matters for charting and combobox choices.
 
 ---
 
-## 1. Prisma + Turso (libSQL)
+## New Capabilities Required
 
-### How It Works
+### 1. Charting / Stats Dashboard
 
-Prisma connects to Turso via the `@prisma/adapter-libsql` driver adapter, which wraps `@libsql/client`.
-The client speaks the libSQL protocol over HTTPS (or WebSocket), so no local file access is needed.
-This is an officially supported Prisma driver adapter as of Prisma 5.4.2+.
+**Recommendation: Recharts v3 (direct install, no wrapper)**
 
-The current project is on Prisma 6.15.0, which fully supports this adapter.
+Recharts 3.0 was released June 2025 and reached v3.7+ by early 2026. It has full React 19 support as of v3.0 (resolved the prior peer dependency conflicts in v2.x alpha). It renders SVG via React components — no canvas, no separate renderer.
 
-### Packages to Install
+**Why Recharts over alternatives:**
 
-```bash
-# Add
-npm install @prisma/adapter-libsql @libsql/client
+- **vs Tremor:** Tremor is a Tailwind dashboard component kit built on top of Recharts. It adds Tailwind v3 design tokens, Radix UI, and opinionated styling. This project already has its own Tailwind design token system — Tremor would clash with existing `bg-surface`/`border-border` CSS custom properties. Recharts directly gives full control over styling. Tremor is ideal for greenfield dashboards, not additions to existing design systems.
+- **vs Chart.js / react-chartjs-2:** Canvas-based. SVG-based libraries (Recharts) give finer React control, better accessibility, and composable tooltip/legend customization without fighting the imperative Chart.js API from inside React.
+- **vs Victory / Nivo:** Heavier, less maintained momentum. Recharts has 9.5M+ weekly downloads vs Nivo's ~600K.
 
-# Remove (no longer needed on Vercel — keep locally if you want local dev with SQLite)
-npm uninstall @prisma/adapter-better-sqlite3 better-sqlite3
-```
+**Charts needed for this project:** Bar (win rates by player), Pie/Donut (overall win distribution), Bar (deck win rates). All are first-class Recharts component types (`BarChart`, `PieChart`). No D3 or custom renderers needed.
+
+**Bundle size:** Recharts v3 supports tree-shaking via ESM. Import only the components used (`BarChart`, `Bar`, `XAxis`, `YAxis`, `Tooltip`, `PieChart`, `Pie`, `Cell`) — the per-route bundle impact is significantly less than the full library. Raw gzip for the full package is approximately 190 KB minified / 52 KB gzipped (per Bundlephobia for v3.8.x), but with tree-shaking on a stats-only page, real impact is well under that. For a Vercel Hobby app with ~10 users, this is acceptable.
 
 | Package | Version | Purpose |
 |---------|---------|---------|
-| `@prisma/adapter-libsql` | `^6.15.0` | Prisma driver adapter for libSQL/Turso — match your Prisma version |
-| `@libsql/client` | `^0.14.0` | libSQL HTTP/WebSocket client (underlying transport) |
-
-**Confidence:** HIGH — this adapter has been the canonical Prisma/Turso integration path since Prisma 5.4.2. The `@prisma/adapter-libsql` package version should track your `prisma` and `@prisma/client` versions.
-
-### Prisma Schema Changes
-
-Two changes required: generator config (add `previewFeatures`) and datasource provider.
-
-**Before (`prisma/schema.prisma`):**
-```prisma
-generator client {
-  provider = "prisma-client-js"
-}
-
-datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
-}
-```
-
-**After:**
-```prisma
-generator client {
-  provider        = "prisma-client-js"
-  previewFeatures = ["driverAdapters"]
-}
-
-datasource db {
-  provider = "sqlite"
-  url      = env("TURSO_DATABASE_URL")
-  relationMode = "prisma"
-}
-```
-
-**Note on `relationMode = "prisma"`:** Turso does not enforce foreign keys at the database level by
-default. Setting `relationMode = "prisma"` makes Prisma enforce referential integrity in application
-code instead of relying on DB constraints. This is the documented recommendation for Turso. Your
-existing schema uses `onDelete: Cascade` on `CollectionCard → User`; with `relationMode = "prisma"`
-Prisma handles the cascade in code.
-
-**Note on `previewFeatures`:** As of Prisma 6.x, driver adapters may have graduated out of preview.
-Check the Prisma 6 changelog — if `driverAdapters` is GA, this line can be omitted. Including it is
-safe either way (it is a no-op if already GA).
-
-### Prisma Client Instantiation Change
-
-The client initialization must change to pass the adapter.
-
-**Before:**
-```typescript
-// src/lib/prisma.ts (approximate current pattern)
-import { PrismaClient } from '@prisma/client'
-const prisma = new PrismaClient()
-export default prisma
-```
-
-**After:**
-```typescript
-import { PrismaClient } from '@prisma/client'
-import { PrismaLibSQL } from '@prisma/adapter-libsql'
-import { createClient } from '@libsql/client'
-
-const libsql = createClient({
-  url: process.env.TURSO_DATABASE_URL!,
-  authToken: process.env.TURSO_AUTH_TOKEN!,
-})
-
-const adapter = new PrismaLibSQL(libsql)
-
-const globalForPrisma = global as unknown as { prisma: PrismaClient }
-
-export const prisma =
-  globalForPrisma.prisma ??
-  new PrismaClient({ adapter })
-
-if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma
-```
-
-The global singleton pattern prevents multiple client instances during Next.js hot reload in dev.
-
-### Required Environment Variables
+| `recharts` | `^3.7.0` | Bar, Pie, Line charts for stats dashboard |
 
 ```bash
-# .env (local dev — point at your Turso database)
-TURSO_DATABASE_URL="libsql://your-db-name.turso.io"
-TURSO_AUTH_TOKEN="your-turso-auth-token"
-
-# For local dev using an embedded replica (optional, faster local dev):
-# TURSO_DATABASE_URL="file:./dev.db"
-# TURSO_AUTH_TOKEN=""  # empty token works for local file
+npm install recharts
 ```
 
-Turso free tier provides 500 databases, 9 GB storage, and 1 billion row reads/month — well within
-the needs of a small friend-group app.
-
-### Migration Strategy
-
-Turso does not run Prisma migrations the same way as SQLite files. Recommended approach:
-
-1. Run `npx prisma migrate dev` locally against the Turso remote URL to apply the initial schema.
-2. On subsequent deploys, run `npx prisma migrate deploy` in the Vercel build step.
-3. Add to `package.json` scripts:
-   ```json
-   "postbuild": "prisma generate"
-   ```
-   Or run `prisma generate` as part of the Vercel build command.
+**Tailwind v4 integration note:** Recharts renders inline SVG styles — it does not use Tailwind classes internally. Chart colors are passed as props (`fill`, `stroke`). Use CSS custom properties from the existing design token system (e.g., `var(--color-accent)`) as fill values to stay consistent with the app theme.
 
 ---
 
-## 2. Puppeteer on Vercel (@sparticuz/chromium)
+### 2. Autocomplete / Combobox Dropdowns
 
-### Why Full Puppeteer Fails on Vercel
+**Recommendation: Build with cmdk + Popover (same primitives shadcn uses), OR a minimal custom combobox using native HTML datalist**
 
-Vercel serverless functions have a **50 MB compressed bundle limit**. `puppeteer` (full package)
-downloads a full Chromium binary (~170 MB uncompressed, ~100+ MB compressed) during `npm install`
-and references it at runtime. This exceeds the bundle limit and also violates Vercel's read-only
-filesystem constraint for writing Chrome's runtime files.
+The game tracking form needs:
+- Player name autocomplete (from existing `User` records)
+- Deck name autocomplete (free-text + suggestions)
+- Winner selection (from players in that game)
 
-`@sparticuz/chromium` is a Chromium build specifically stripped and compressed for AWS Lambda and
-Vercel-like environments. It decompresses at runtime into `/tmp` (which is writable in serverless).
-The uncompressed binary is ~170 MB but fits because it lives in `/tmp`, not the function bundle.
+**Option A — cmdk (recommended for full keyboard nav + search filtering):**
 
-### Packages
-
-```bash
-# Remove full puppeteer
-npm uninstall puppeteer
-
-# Add serverless-compatible pair
-npm install puppeteer-core @sparticuz/chromium
-```
+`cmdk` is the command palette library that powers shadcn's `Command` component. It provides a filterable list with keyboard navigation, accessible ARIA roles, and a composable API. It does NOT impose design — all styling is via className. Works directly with Tailwind v4 custom classes.
 
 | Package | Version | Purpose |
 |---------|---------|---------|
-| `puppeteer-core` | `^22.x` or `^23.x` | Puppeteer without the bundled Chromium download — use this to control the @sparticuz/chromium binary |
-| `@sparticuz/chromium` | `^131.0.0` or latest | Stripped Chromium binary for serverless environments |
+| `cmdk` | `^1.0.0` | Filterable command/autocomplete primitive |
 
-**CRITICAL VERSION CONSTRAINT:** `puppeteer-core` and `@sparticuz/chromium` must target the same
-Chrome version. `@sparticuz/chromium` releases follow Chrome version numbers (e.g., v131.0.0 =
-Chrome 131). Check the `@sparticuz/chromium` README on GitHub for the compatible `puppeteer-core`
-version for your chosen chromium version.
-
-As of mid-2025, `@sparticuz/chromium@131` paired with `puppeteer-core@22.x` was the well-tested
-combination. **Verify on npm before pinning.**
-
-**Confidence:** MEDIUM — the package pairing pattern is stable and well-documented, but exact minor
-versions should be confirmed against the @sparticuz/chromium compatibility table before installing.
-
-### Code Change Pattern
-
-Existing scraper files use `puppeteer.launch(...)`. Change to:
-
-```typescript
-// Before (src/lib/scrapeLGS/browser.ts)
-import puppeteer from 'puppeteer'
-const browser = await puppeteer.launch({ headless: true })
-
-// After
-import puppeteer from 'puppeteer-core'
-import chromium from '@sparticuz/chromium'
-
-const browser = await puppeteer.launch({
-  args: chromium.args,
-  defaultViewport: chromium.defaultViewport,
-  executablePath: await chromium.executablePath(),
-  headless: chromium.headless,
-})
+```bash
+npm install cmdk
 ```
 
-The import changes from `puppeteer` to `puppeteer-core` and from `puppeteer-core` to `@sparticuz/chromium`.
-All existing `page.*` API calls remain identical — only the launch configuration changes.
+Use it with a `<Popover>`-style wrapper (position an absolutely-positioned div below the input, toggle on focus). No Radix UI required — the existing UI already handles popovers via plain CSS positioning if needed, or implement a minimal one.
 
-### Next.js Configuration
+**Why not full shadcn/ui:** shadcn/ui is a copy-paste component system. Installing it via CLI rewrites `globals.css` with its own CSS variable tokens, which would clobber the existing `--color-accent`, `--color-surface`, etc. design tokens. The right approach for this project is to copy only the `Command` component source into the project (shadcn's model) — but that pulls in Radix UI primitives (`@radix-ui/react-dialog`), adding ~15 KB gzipped. For three comboboxes in a game form, cmdk directly is simpler.
 
-Vercel/webpack needs to know not to try to bundle the Chromium binary. Add to `next.config.ts`:
+**Option B — native `<datalist>` (no dependency):**
 
-```typescript
-import type { NextConfig } from 'next'
+HTML5 `<datalist>` provides browser-native autocomplete for text inputs. Zero JS, zero dependency. Limitations: no custom styling of the dropdown (browser-rendered), no keyboard arrow-key filtering in all browsers, no multi-select. Acceptable for "winner deck" where the list is short and filtering is less critical.
 
-const nextConfig: NextConfig = {
-  webpack: (config, { isServer }) => {
-    if (isServer) {
-      // Prevent webpack from bundling chromium — it loads at runtime from /tmp
-      config.externals = [...(config.externals || []), '@sparticuz/chromium']
-    }
-    return config
-  },
-  // Required: tell Next.js these routes use Node.js runtime, not Edge runtime
-  // (Edge runtime does not support spawning processes)
-  experimental: {
-    // No special flag needed — App Router API routes default to Node.js runtime
-  },
-}
-
-export default nextConfig
-```
-
-**Important:** Vercel serverless functions that use Puppeteer must explicitly declare Node.js runtime
-in the route file, not Edge runtime:
-
-```typescript
-// src/app/api/scrapeLGS/route.ts — add this at the top
-export const runtime = 'nodejs'
-
-// Also set max duration (Vercel Hobby allows up to 60s on Pro, 10s on Hobby for standard)
-export const maxDuration = 60 // seconds — verify against your Vercel plan
-```
-
-**Hobby tier timeout:** Vercel Hobby plan serverless functions have a **10-second execution timeout**
-for standard functions. Puppeteer scraping a page often takes longer than 10 seconds. This is a
-hard constraint on the free tier.
-
-Mitigation options:
-1. Use `export const maxDuration = 60` — this requires Vercel Pro (not free).
-2. Optimize scrapers to be faster (e.g., block images/CSS in Puppeteer to reduce load time).
-3. Accept that the free tier constraint limits scraping to fast-loading pages only.
-
-This is a **critical constraint** that should be surfaced in the roadmap.
-
-### Vercel Function Size Limit
-
-The Vercel 50 MB limit applies to the deployed function bundle (your code + node_modules). The
-`@sparticuz/chromium` package itself adds roughly 50–60 MB to the bundle. This may push the
-`/api/scrapeLGS` route close to or over the limit.
-
-To address this, use Vercel's `functions` config to isolate the scraper routes:
-
-```json
-// vercel.json
-{
-  "functions": {
-    "src/app/api/scrapeLGS/route.ts": {
-      "memory": 1024,
-      "maxDuration": 10
-    }
-  }
-}
-```
-
-If bundle size is an issue, the `@sparticuz/chromium-min` package variant downloads the binary from
-an S3 URL at cold start instead of bundling it, keeping the function bundle under 50 MB. This adds
-~3-5s cold start latency but solves the size constraint:
-
-```typescript
-// chromium-min usage
-import chromium from '@sparticuz/chromium-min'
-
-const browser = await puppeteer.launch({
-  args: chromium.args,
-  defaultViewport: chromium.defaultViewport,
-  executablePath: await chromium.executablePath(
-    'https://github.com/Sparticuz/chromium/releases/download/v131.0.0/chromium-v131.0.0-pack.tar'
-  ),
-  headless: chromium.headless,
-})
-```
-
-**Recommendation:** Start with `@sparticuz/chromium` (no S3 dependency). If builds fail due to
-size, switch to `@sparticuz/chromium-min`.
+**Recommendation:** Use `cmdk` for the player picker (needs reliable selection from a defined list), and `<datalist>` for the deck name field (free-text with suggestions, list may be long/dynamic).
 
 ---
 
-## 3. Vercel Cron Jobs
+### 3. Rate Limiting
 
-### Setup
+**Recommendation: In-process Map-based rate limiter (zero dependencies)**
 
-Vercel Cron is configured entirely in `vercel.json` at the project root. No packages required.
+**Context:** This is a private app for ~10 friends. Rate limiting is abuse protection, not DDoS mitigation. The threat model is accidental hammering (buggy client) or someone sharing the group password externally.
 
-```json
-// vercel.json
-{
-  "crons": [
-    {
-      "path": "/api/cron/sync-collections",
-      "schedule": "0 6 * * *"
-    }
-  ]
-}
-```
+**Serverless reality:** Vercel serverless functions are stateless — each cold start gets a fresh in-memory store. On Vercel Hobby with ~10 users and light traffic, function instances stay warm between requests. An in-memory Map-based limiter works well enough: it resets on cold starts, but that's fine for this use case. The alternative (Upstash Redis) requires a free Upstash account, an API key, and adds network latency to every request.
 
-- `schedule` uses standard cron syntax in UTC. `0 6 * * *` = 6:00 AM UTC daily (midnight EST /
-  1 AM EDT — adjust to taste).
-- The `path` must be a valid GET-able API route in your Next.js app.
-- Vercel Hobby plan: **1 cron job**, minimum frequency = daily (cannot run more than once per day
-  on free tier). This project only needs one daily sync, so the free tier is sufficient.
+**Verdict: A 15-line in-memory sliding window Map is the right tool for this project. Do NOT add Upstash.**
 
-**Confidence:** HIGH — Vercel Cron `vercel.json` syntax is stable and well-documented.
-
-### API Route
-
-Create a new route for the cron trigger. Cron jobs call the endpoint with a GET request and pass
-a `Authorization: Bearer <CRON_SECRET>` header that Vercel sets automatically.
+The pattern: declare a `Map<string, { count: number; resetAt: number }>` at module scope (survives warm invocations), keyed by IP from `x-forwarded-for`. Apply to LGS scrape routes and the game tracking write endpoints.
 
 ```typescript
-// src/app/api/cron/sync-collections/route.ts
-import { NextRequest, NextResponse } from 'next/server'
-import { updateAllCollections } from '@/lib/updateCollections'
+// src/lib/rateLimit.ts — zero dependencies
+const requestCounts = new Map<string, { count: number; resetAt: number }>();
 
-export const runtime = 'nodejs'
-export const maxDuration = 60 // needs Pro, or reduce to 10 for Hobby
+export function checkRateLimit(ip: string, maxRequests = 10, windowMs = 60_000): boolean {
+  const now = Date.now();
+  const record = requestCounts.get(ip);
 
-export async function GET(request: NextRequest) {
-  // Verify the request is from Vercel Cron
-  const authHeader = request.headers.get('authorization')
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!record || now > record.resetAt) {
+    requestCounts.set(ip, { count: 1, resetAt: now + windowMs });
+    return true; // allowed
   }
 
-  try {
-    await updateAllCollections()
-    return NextResponse.json({ success: true, message: 'Collections synced' })
-  } catch (error) {
-    console.error('Cron sync failed:', error)
-    return NextResponse.json({ error: 'Sync failed' }, { status: 500 })
-  }
+  if (record.count >= maxRequests) return false; // blocked
+
+  record.count++;
+  return true; // allowed
 }
 ```
 
-Add to environment variables:
-```bash
-CRON_SECRET="a-long-random-secret-string"
+**IP extraction from Next.js App Router:**
+```typescript
+// In a Route Handler:
+const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? '127.0.0.1';
 ```
 
-Vercel automatically injects `CRON_SECRET` into cron requests. Set this variable in the Vercel
-dashboard and locally in `.env`.
-
-**Important:** The cron route triggers `updateAllCollections()` which internally uses Puppeteer
-(for Moxfield scraping). The same 10-second timeout constraint from Section 2 applies. If
-collection sync takes more than 10 seconds (it likely does — it scrapes multiple Moxfield pages),
-this will time out on Hobby tier. Consider decoupling the cron trigger from the actual sync by
-having the cron set a flag and a separate long-running process handle the sync, or upgrade to Pro
-for the 60-second limit.
+**When to use Upstash instead:** If this app ever becomes multi-tenant, public-facing, or gets significant traffic. The `@upstash/ratelimit` package with Upstash Redis free tier (10K requests/day free) is the next step. For now, the in-memory approach is correct.
 
 ---
 
-## 4. Simple httpOnly Cookie Auth (App Router, No Library)
+### 4. DB Schema Additions (Prisma + Turso/libSQL)
 
-### Design
+**Game tracking needs two new models.**
 
-Two passwords, two cookies:
-- `auth_session` — presence means user has entered the group password
-- `admin_session` — presence means user has entered the admin password
+Turso uses SQLite under the hood — no JSON column type (SQLite stores JSON as TEXT). Prisma's `String` type is the correct mapping for any serialized data. Relation arrays (players in a game) should be a junction table, not a JSON array — this enables proper querying for per-player stats.
 
-Both are httpOnly, Secure, SameSite=Lax cookies. No JWT, no database, no library.
+**Proposed schema additions:**
 
-**Confidence:** HIGH — this is standard Next.js App Router cookie handling with the built-in
-`next/headers` cookies API.
+```prisma
+model Game {
+  id          String       @id @default(cuid())
+  playedAt    DateTime
+  winnerId    String?
+  notes       String?
+  createdAt   DateTime     @default(now())
+  
+  winner      Player?      @relation("GameWinner", fields: [winnerId], references: [id])
+  players     GamePlayer[]
+  
+  @@map("games")
+}
 
-### Environment Variables
+model Player {
+  id          String       @id @default(cuid())
+  name        String       @unique
+  // Optional link to a User (Moxfield user) — nullable
+  userId      String?
+  
+  gamesPlayed GamePlayer[]
+  gamesWon    Game[]       @relation("GameWinner")
+  
+  @@map("players")
+}
 
-```bash
-AUTH_PASSWORD="shared-group-password"
-ADMIN_PASSWORD="separate-admin-password"
-AUTH_SECRET="random-string-used-to-sign-cookies"  # optional if not signing
+model GamePlayer {
+  id          String   @id @default(cuid())
+  gameId      String
+  playerId    String
+  deckName    String
+  wasScrew    Boolean  @default(false)
+  
+  game        Game     @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  player      Player   @relation(fields: [playerId], references: [id])
+  
+  @@unique([gameId, playerId])
+  @@index([gameId])
+  @@index([playerId])
+  @@map("game_players")
+}
 ```
 
-### Login API Route
+**Key decisions:**
+- `Player` is separate from `User` — not all game players will have Moxfield accounts. The optional `userId` field allows seeding from existing Users without requiring it.
+- `wasScrew` is a boolean per `GamePlayer` — "screwed" is a per-player-per-game state, not a property of the game itself.
+- `deckName` is a `String` on `GamePlayer` (not a separate Deck model) — deck names are free-text, and a full Deck model adds complexity not yet needed. Distinct deck names can be queried with `SELECT DISTINCT deckName` for autocomplete suggestions.
+- `winner` is nullable — supports recording games where no winner is declared.
+
+**Migration:** Continue using `prisma db push` (already established for Turso compatibility). `prisma migrate deploy` remains incompatible with the libsql adapter.
+
+---
+
+### 5. Admin Improvements: Sync History & Error Alerting
+
+**Sync history:** Add a `SyncLog` model to record cron run outcomes.
+
+```prisma
+model SyncLog {
+  id        String   @id @default(cuid())
+  startedAt DateTime @default(now())
+  finishedAt DateTime?
+  status    String   // "success" | "partial" | "failed"
+  details   String?  // JSON stringified per-user results
+  
+  @@map("sync_logs")
+}
+```
+
+**Error alerting on cron failure:** The project is Hobby tier — no budget for external alerting services (PagerDuty, etc.). Options in order of simplicity:
+
+1. **Email via Resend free tier (100 emails/day):** Add `resend` package, send to the developer's email on cron failure. Resend free tier is permanent, no credit card required.
+2. **Discord webhook:** POST to a Discord channel webhook URL on failure. Zero dependencies — pure `fetch`. Ideal for a friend group that likely already uses Discord.
+3. **Log to SyncLog and poll from admin dashboard:** No external dependency. Admin panel shows last sync status and timestamp. Failure is visible on next admin visit.
+
+**Recommendation:** Discord webhook (Option 2) — it is zero-dependency, free forever, and maps naturally to a friend group context. Store the webhook URL in an environment variable.
 
 ```typescript
-// src/app/api/auth/login/route.ts
-import { NextRequest, NextResponse } from 'next/server'
-import { cookies } from 'next/headers'
-
-export async function POST(request: NextRequest) {
-  const { password, type } = await request.json()
-
-  if (type === 'admin') {
-    if (password !== process.env.ADMIN_PASSWORD) {
-      return NextResponse.json({ error: 'Invalid password' }, { status: 401 })
-    }
-    const response = NextResponse.json({ success: true })
-    response.cookies.set('admin_session', 'authenticated', {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 60 * 60 * 24 * 7, // 7 days
-      path: '/',
-    })
-    return response
-  }
-
-  if (password !== process.env.AUTH_PASSWORD) {
-    return NextResponse.json({ error: 'Invalid password' }, { status: 401 })
-  }
-
-  const response = NextResponse.json({ success: true })
-  response.cookies.set('auth_session', 'authenticated', {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    maxAge: 60 * 60 * 24 * 30, // 30 days
-    path: '/',
-  })
-  return response
-}
+// Zero-dependency Discord alert in cron route
+await fetch(process.env.DISCORD_WEBHOOK_URL!, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ content: `❌ Nightly sync failed: ${error.message}` }),
+});
 ```
 
-### Logout Route
-
-```typescript
-// src/app/api/auth/logout/route.ts
-import { NextResponse } from 'next/server'
-
-export async function POST() {
-  const response = NextResponse.json({ success: true })
-  response.cookies.delete('auth_session')
-  response.cookies.delete('admin_session')
-  return response
-}
-```
-
-### Middleware (Protecting All Routes)
-
-Use Next.js middleware to gate every page and API route. This runs at the edge before any route
-handler, so unauthorized requests never reach application code.
-
-```typescript
-// middleware.ts (project root, next to package.json)
-import { NextRequest, NextResponse } from 'next/server'
-
-export function middleware(request: NextRequest) {
-  const { pathname } = request.nextUrl
-
-  // Allow the auth login routes through (otherwise users can never log in)
-  if (pathname.startsWith('/api/auth')) {
-    return NextResponse.next()
-  }
-
-  const authCookie = request.cookies.get('auth_session')
-
-  // No auth cookie — redirect to login page
-  if (!authCookie || authCookie.value !== 'authenticated') {
-    if (pathname.startsWith('/api/')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-    return NextResponse.redirect(new URL('/login', request.url))
-  }
-
-  // For admin routes, additionally check the admin cookie
-  if (pathname.startsWith('/admin') || pathname.startsWith('/api/admin')) {
-    const adminCookie = request.cookies.get('admin_session')
-    if (!adminCookie || adminCookie.value !== 'authenticated') {
-      if (pathname.startsWith('/api/')) {
-        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-      }
-      return NextResponse.redirect(new URL('/admin/login', request.url))
-    }
-  }
-
-  return NextResponse.next()
-}
-
-export const config = {
-  // Match all routes except Next.js internals and static files
-  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
-}
-```
-
-### Login Page (Minimal)
-
-```typescript
-// src/app/login/page.tsx — client component
-'use client'
-import { useState } from 'react'
-import { useRouter } from 'next/navigation'
-
-export default function LoginPage() {
-  const [password, setPassword] = useState('')
-  const [error, setError] = useState('')
-  const router = useRouter()
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    const res = await fetch('/api/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password, type: 'user' }),
-    })
-    if (res.ok) {
-      router.push('/')
-      router.refresh()
-    } else {
-      setError('Wrong password')
-    }
-  }
-
-  return (
-    <form onSubmit={handleSubmit}>
-      <input
-        type="password"
-        value={password}
-        onChange={e => setPassword(e.target.value)}
-        placeholder="Group password"
-      />
-      <button type="submit">Enter</button>
-      {error && <p>{error}</p>}
-    </form>
-  )
-}
-```
-
-**Security note:** Cookie value is `'authenticated'` (a static string). This is sufficient for a
-closed friend group behind a shared password — it is not a signed JWT. If the cookie value is
-guessed or spoofed, the gate is bypassed. For this use case (private friend group, not financial
-or sensitive data), this risk is acceptable. If stricter security is needed, sign the cookie value
-with `AUTH_SECRET` using the Web Crypto API.
+No package needed — plain `fetch` works in Next.js App Router serverless functions.
 
 ---
 
 ## Complete Package Change Summary
 
-### Packages to Remove
+### Add
 
 ```bash
-npm uninstall puppeteer @prisma/adapter-better-sqlite3 better-sqlite3 @types/better-sqlite3
+npm install recharts cmdk
 ```
 
-### Packages to Add
+### Do NOT Add
 
-```bash
-# Prisma + Turso
-npm install @prisma/adapter-libsql @libsql/client
-
-# Puppeteer serverless
-npm install puppeteer-core @sparticuz/chromium
-```
-
-### Resulting `dependencies` section (approximate)
-
-```json
-{
-  "dependencies": {
-    "@libsql/client": "^0.14.0",
-    "@prisma/adapter-libsql": "^6.15.0",
-    "@sparticuz/chromium": "^131.0.0",
-    "lucide-react": "^0.562.0",
-    "next": "^16.1.6",
-    "puppeteer-core": "^22.0.0",
-    "react": "19.2.3",
-    "react-dom": "19.2.3"
-  },
-  "devDependencies": {
-    "@prisma/client": "^6.15.0",
-    "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "eslint": "^9",
-    "eslint-config-next": "16.1.1",
-    "prisma": "^6.15.0",
-    "tailwindcss": "^4",
-    "tsx": "^4.21.0",
-    "typescript": "^5"
-  }
-}
-```
+| Package | Why Not |
+|---------|---------|
+| `@upstash/ratelimit` + `@upstash/redis` | Overkill for 10-user private app; adds external dependency and API key management |
+| `@tremor/react` | Clobbers existing design tokens; wraps Recharts with opinions that fight the existing UI |
+| `chart.js` / `react-chartjs-2` | Canvas-based; worse React integration than Recharts |
+| `@radix-ui/react-popover` (full shadcn install) | Rewrites globals.css; disrupts existing design token system |
+| `resend` | Discord webhook solves error alerting for zero dependencies and zero cost |
 
 ---
 
 ## Alternatives Considered
 
-| Category | Recommended | Alternative | Why Not |
-|----------|-------------|-------------|---------|
-| Cloud DB | Turso (libSQL) | PlanetScale, Neon (Postgres) | Schema is SQLite; Turso = zero schema changes, just driver swap |
-| Serverless Chromium | `@sparticuz/chromium` | `chrome-aws-lambda` | `chrome-aws-lambda` is unmaintained (last release 2022); `@sparticuz/chromium` is the active fork |
-| Serverless Chromium | `@sparticuz/chromium` | `playwright` + `@playwright/browser-chromium` | Same bundle size problem, no advantage for this use case |
-| Auth | Hand-rolled httpOnly cookie | `next-auth`, `lucia`, `better-auth` | Auth libraries are overkill for a single shared password; they add complexity and require a User model |
-| Cron | Vercel Cron | Upstash QStash, GitHub Actions schedule | Vercel Cron is built-in, zero config, free on Hobby for daily jobs |
+| Category | Recommended | Alternative | When Alternative Makes Sense |
+|----------|-------------|-------------|------------------------------|
+| Charts | `recharts` direct | Tremor | Greenfield dashboard with no existing design system |
+| Charts | `recharts` direct | Chart.js | Non-React projects or when canvas rendering is required |
+| Combobox | `cmdk` | Native `<datalist>` | Short static lists where custom styling is not needed |
+| Combobox | `cmdk` | Full shadcn combobox | Projects not already invested in a custom design token system |
+| Rate limiting | In-memory Map | `@upstash/ratelimit` | Public-facing app, >100 concurrent users, or multi-instance deployment |
+| Error alerting | Discord webhook | `resend` email | Projects without an existing Discord server |
 
 ---
 
-## Known Constraints (Hard Limits on Free Tier)
+## Version Compatibility
 
-| Constraint | Limit | Impact |
-|------------|-------|--------|
-| Vercel Hobby function timeout | 10 seconds | Puppeteer scraping may time out; Moxfield sync almost certainly will |
-| Vercel Hobby cron jobs | 1 per project, daily minimum | Sufficient — only one nightly sync needed |
-| Vercel function bundle size | 50 MB compressed | `@sparticuz/chromium` is ~50 MB; may require `chromium-min` variant |
-| Turso free tier | 500 DBs, 9 GB storage, 1B row reads/month | Well within bounds for this use case |
-| Vercel serverless filesystem | `/tmp` only, 512 MB | Chromium decompresses to `/tmp` — within limits |
+| Package | React Peer | Tailwind Notes |
+|---------|-----------|----------------|
+| `recharts@^3.7.0` | React 18 + 19 (verified, GA since v3.0) | SVG-based, no Tailwind dependency; use CSS custom properties for theme colors |
+| `cmdk@^1.0.0` | React 18 + 19 (shadcn ships it with React 19) | Unstyled; works with any className including Tailwind v4 |
 
 ---
 
 ## Sources
 
-All findings are from training data (cutoff August 2025). No live web fetches were possible in this
-session (WebSearch and WebFetch were blocked). The following official sources were used as the basis
-for recommendations and should be verified before implementation:
+- recharts npm page + GitHub releases: https://github.com/recharts/recharts/releases — v3.7.0 confirmed React 19 support
+- recharts React 19 issue thread: https://github.com/recharts/recharts/issues/4558 — confirmed resolved in v3.0
+- shadcn/ui Tailwind v4 docs: https://ui.shadcn.com/docs/tailwind-v4 — confirmed shadcn updated all components for Tailwind v4 + React 19
+- shadcn combobox docs: https://ui.shadcn.com/docs/components/radix/combobox — cmdk is the underlying primitive
+- Next.js rate limiting discussion: https://github.com/vercel/next.js/discussions/12134 — in-memory Map pattern documented
+- In-memory rate limiter for Next.js: https://www.javacodegeeks.com/building-an-in-memory-rate-limiter-in-next-js.html — pattern verified
+- Upstash ratelimit docs: https://github.com/upstash/ratelimit-js — cited for when to use distributed approach
+- Prisma Turso docs: https://www.prisma.io/docs/orm/overview/databases/turso — libsql adapter constraints confirmed
 
-- Prisma Turso docs: https://www.prisma.io/docs/orm/overview/databases/turso
-- `@sparticuz/chromium` README: https://github.com/Sparticuz/chromium
-- Vercel Cron docs: https://vercel.com/docs/cron-jobs
-- Next.js App Router cookies docs: https://nextjs.org/docs/app/api-reference/functions/cookies
-- Next.js Middleware docs: https://nextjs.org/docs/app/building-your-application/routing/middleware
-- Vercel function size limits: https://vercel.com/docs/functions/limitations
+---
 
-**Version verification required before installing:**
-- `@sparticuz/chromium` + `puppeteer-core` version pairing (check chromium README compatibility table)
-- `@prisma/adapter-libsql` version (should match installed `prisma` version — 6.15.0)
-- `@libsql/client` latest stable release
+*Stack research for: magic-scraper v1.1 game tracking milestone additions*
+*Researched: 2026-04-09*
