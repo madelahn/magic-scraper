@@ -14,7 +14,8 @@ model User {
   moxfieldCollectionId  String            @unique
   lastUpdated           DateTime          @default(now())
   collectionCards       CollectionCard[]
-  
+  syncLogs              SyncLog[]
+
   @@map("users")
 }
 
@@ -30,10 +31,50 @@ model CollectionCard {
   isFoil      Boolean
   typeLine    String
   lastUpdated DateTime @default(now())
-  
+
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
+
   @@index([cardName])
   @@index([userId])
   @@map("collection_cards")
+}
+
+model Game {
+  id           String              @id @default(cuid())
+  date         DateTime
+  wonByCombo   Boolean             @default(false)
+  notes        String?
+  createdAt    DateTime            @default(now())
+
+  participants GameParticipant[]
+
+  @@index([date])
+  @@map("games")
+}
+
+model GameParticipant {
+  id          String  @id @default(cuid())
+  gameId      String
+  playerName  String
+  isWinner    Boolean
+  isScrewed   Boolean
+  deckName    String?
+
+  game Game @relation(fields: [gameId], references: [id], onDelete: Cascade)
+
+  @@index([playerName])
+  @@map("game_participants")
+}
+
+model SyncLog {
+  id           String   @id @default(cuid())
+  userId       String
+  status       String
+  errorMessage String?
+  createdAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("sync_logs")
 }
