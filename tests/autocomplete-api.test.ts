@@ -3,10 +3,10 @@
  * Mocks prisma, rateLimit, and next/server
  */
 
-const mockUserFindMany = jest.fn();
-const mockParticipantFindMany = jest.fn();
-const mockCheckRateLimit = jest.fn();
-const mockGetIpKey = jest.fn(() => 'test-ip');
+const mockUserFindMany: jest.Mock = jest.fn();
+const mockParticipantFindMany: jest.Mock = jest.fn();
+const mockCheckRateLimit: jest.Mock = jest.fn();
+const mockGetIpKey: jest.Mock = jest.fn(() => 'test-ip');
 
 jest.mock('@/lib/prisma', () => ({
   prisma: {
@@ -16,8 +16,9 @@ jest.mock('@/lib/prisma', () => ({
 }));
 
 jest.mock('@/lib/rateLimit', () => ({
-  checkRateLimit: (...args: unknown[]) => mockCheckRateLimit(...args),
-  getIpKey: (...args: unknown[]) => mockGetIpKey(...args),
+  checkRateLimit: (key: string, limit: number, windowMs: number) =>
+    mockCheckRateLimit(key, limit, windowMs),
+  getIpKey: (request: Request) => mockGetIpKey(request),
 }));
 
 jest.mock('next/server', () => ({
@@ -83,6 +84,17 @@ describe('GET /api/players', () => {
     const res: any = await getPlayers(makeRequest());
     expect(res.status).toBe(500);
     expect(res.body).toEqual({ error: 'Failed to fetch players' });
+  });
+
+  it('dedupes case-sensitively (alice and Alice are distinct entries)', async () => {
+    mockUserFindMany.mockResolvedValue([{ name: 'Alice' }]);
+    mockParticipantFindMany.mockResolvedValue([{ playerName: 'alice' }, { playerName: 'Alice' }]);
+    const res: any = await getPlayers(makeRequest());
+    // Both cases preserved (dedup is case-sensitive via Set), Alice appears exactly once
+    expect(res.body.players).toContain('Alice');
+    expect(res.body.players).toContain('alice');
+    expect(res.body.players.filter((p: string) => p === 'Alice')).toHaveLength(1);
+    expect(res.body.players).toHaveLength(2);
   });
 });
 
