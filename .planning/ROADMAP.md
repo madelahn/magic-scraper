@@ -22,7 +22,7 @@
 **Milestone Goal:** Add a game tracking system with stats dashboard, harden existing scrapers and add rate limiting, and improve admin tooling.
 
 - [ ] **Phase 5: Schema Migration & Foundation** - Add Game, GameParticipant, and SyncLog tables to local and production Turso
-- [ ] **Phase 6: Game Tracking Core** - Game entry form with autocomplete, CRUD endpoints, game history table, rate limiting
+- [x] **Phase 6: Game Tracking Core** - Game entry form with autocomplete, CRUD endpoints, game history table, rate limiting
 - [ ] **Phase 7: Stats Dashboard** - Win/screwed rate charts, game frequency, pie charts with Recharts dynamic import
 - [ ] **Phase 8: Admin Improvements** - Sync history view, inline collection ID edit, cron failure alerting, scraper health dashboard
 - [ ] **Phase 9: Scraper Hardening** - Retry logic, typed errors, 401 Games Cloudflare bypass attempt
