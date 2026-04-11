@@ -6,21 +6,22 @@
  */
 
 const mockCheckRateLimit = jest.fn();
-const mockGetIpKey = jest.fn(() => 'test-ip');
+const mockGetIpKey = jest.fn();
+mockGetIpKey.mockReturnValue('test-ip');
 const mockFindMany = jest.fn();
 const mockScrapeAllSites = jest.fn();
 const mockGetCached = jest.fn();
 const mockSetCache = jest.fn();
 
 jest.mock('@/lib/rateLimit', () => ({
-  checkRateLimit: (...args: unknown[]) => mockCheckRateLimit(...args),
-  getIpKey: (...args: unknown[]) => mockGetIpKey(...args),
+  checkRateLimit: (...args: any[]) => mockCheckRateLimit(...args),
+  getIpKey: (...args: any[]) => mockGetIpKey(...args),
 }));
 
 jest.mock('@/lib/prisma', () => ({
   prisma: {
     collectionCard: {
-      findMany: (...args: unknown[]) => mockFindMany(...args),
+      findMany: (...args: any[]) => mockFindMany(...args),
     },
   },
 }));
@@ -39,12 +40,12 @@ jest.mock('@/lib/parseDeck', () => ({
 }));
 
 jest.mock('@/lib/scrapeLGS/scrapeAllSites', () => ({
-  scrapeAllSites: (...args: unknown[]) => mockScrapeAllSites(...args),
+  scrapeAllSites: (...args: any[]) => mockScrapeAllSites(...args),
 }));
 
 jest.mock('@/lib/scrapeLGS/lgsCache', () => ({
-  getCached: (...args: unknown[]) => mockGetCached(...args),
-  setCache: (...args: unknown[]) => mockSetCache(...args),
+  getCached: (...args: any[]) => mockGetCached(...args),
+  setCache: (...args: any[]) => mockSetCache(...args),
 }));
 
 jest.mock('next/server', () => ({
