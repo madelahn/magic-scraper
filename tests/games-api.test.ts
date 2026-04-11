@@ -12,7 +12,7 @@ const mockParticipantCreateMany = jest.fn();
 const mockParticipantDeleteMany = jest.fn();
 const mockTransaction = jest.fn();
 const mockCheckRateLimit = jest.fn();
-const mockGetIpKey = jest.fn(() => 'test-ip');
+const mockGetIpKey = jest.fn((..._args: unknown[]) => 'test-ip');
 
 jest.mock('@/lib/prisma', () => ({
   prisma: {
