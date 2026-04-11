@@ -144,7 +144,11 @@ export interface GameFormProps {
 export function GameForm({ initial, submitLabel = 'Save game', onSubmit }: GameFormProps) {
   const [state, setState] = useState<GameFormState>(
     initial ?? {
-      date: new Date().toISOString().slice(0, 10),
+      // en-CA locale formats dates as YYYY-MM-DD and respects the viewer's
+      // local timezone. Using .toISOString() here would default to UTC day,
+      // which flips to "tomorrow" late in the evening for viewers west of
+      // UTC and silently pre-populates the wrong calendar day.
+      date: new Date().toLocaleDateString('en-CA'),
       notes: '',
       wonByCombo: false,
       rows: [emptyRow(), emptyRow(), emptyRow(), emptyRow()],
