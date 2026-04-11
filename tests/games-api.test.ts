@@ -52,12 +52,21 @@ jest.mock('next/server', () => ({
 }));
 
 import { POST, GET as getGames } from '../src/app/api/games/route';
+import {
+  GET as getGameById,
+  PATCH as patchGame,
+  DELETE as deleteGame,
+} from '../src/app/api/games/[id]/route';
 
 function makeRequest(body?: unknown): Request {
   return {
     headers: { get: (_name: string) => null },
     json: async () => body,
   } as unknown as Request;
+}
+
+function makeParams(id: string) {
+  return { params: Promise.resolve({ id }) };
 }
 
 const validGameBody = {
@@ -264,5 +273,178 @@ describe('GET /api/games', () => {
     const res: any = await getGames(makeRequest());
     expect(res.status).toBe(500);
     expect(res.body).toEqual({ error: 'Failed to fetch games' });
+  });
+});
+
+describe('GET /api/games/[id]', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockCheckRateLimit.mockReturnValue({ allowed: true });
+  });
+
+  it('returns 200 with game + participants when found', async () => {
+    mockGameFindUnique.mockResolvedValue({
+      id: 'g1',
+      date: new Date('2026-04-10'),
+      wonByCombo: false,
+      notes: null,
+      createdAt: new Date(),
+      participants: [
+        {
+          id: 'p1',
+          gameId: 'g1',
+          playerName: 'Alice',
+          isWinner: true,
+          isScrewed: false,
+          deckName: null,
+        },
+      ],
+    });
+    const res: any = await getGameById(makeRequest(), makeParams('g1'));
+    expect(res.status).toBe(200);
+    expect(res.body.game.id).toBe('g1');
+    expect(res.body.game.participants).toHaveLength(1);
+  });
+
+  it('returns 404 when game not found', async () => {
+    mockGameFindUnique.mockResolvedValue(null);
+    const res: any = await getGameById(makeRequest(), makeParams('missing'));
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual({ error: 'Not found' });
+  });
+
+  it('returns 429 when rate limited', async () => {
+    mockCheckRateLimit.mockReturnValue({
+      allowed: false,
+      retryAfterSeconds: 5,
+    });
+    const res: any = await getGameById(makeRequest(), makeParams('g1'));
+    expect(res.status).toBe(429);
+    expect(mockGameFindUnique).not.toHaveBeenCalled();
+  });
+});
+
+describe('PATCH /api/games/[id]', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockCheckRateLimit.mockReturnValue({ allowed: true });
+    mockTransaction.mockImplementation(
+      async (fn: (tx: unknown) => unknown) => {
+        const tx = {
+          game: {
+            create: mockGameCreate,
+            update: mockGameUpdate,
+          },
+          gameParticipant: {
+            createMany: mockParticipantCreateMany,
+            deleteMany: mockParticipantDeleteMany,
+          },
+        };
+        return fn(tx);
+      }
+    );
+  });
+
+  it('full-replace: deletes existing participants, updates game, creates new participants', async () => {
+    mockParticipantDeleteMany.mockResolvedValue({ count: 2 });
+    mockGameUpdate.mockResolvedValue({
+      id: 'g1',
+      date: new Date('2026-04-10'),
+      wonByCombo: true,
+      notes: 'updated',
+      createdAt: new Date(),
+    });
+    mockParticipantCreateMany.mockResolvedValue({ count: 3 });
+
+    const body = {
+      date: '2026-04-10T00:00:00.000Z',
+      wonByCombo: true,
+      notes: 'updated',
+      participants: [
+        { playerName: 'X', isWinner: true, isScrewed: false },
+        { playerName: 'Y', isWinner: false, isScrewed: false },
+        { playerName: 'Z', isWinner: false, isScrewed: true },
+      ],
+    };
+    const res: any = await patchGame(makeRequest(body), makeParams('g1'));
+
+    expect(res.status).toBe(200);
+    expect(mockParticipantDeleteMany).toHaveBeenCalledWith({
+      where: { gameId: 'g1' },
+    });
+    expect(mockGameUpdate).toHaveBeenCalled();
+    const cm = mockParticipantCreateMany.mock.calls[0][0];
+    expect(cm.data).toHaveLength(3);
+  });
+
+  it('returns 400 on ZodError', async () => {
+    const res: any = await patchGame(
+      makeRequest({ foo: 'bar' }),
+      makeParams('g1')
+    );
+    expect(res.status).toBe(400);
+    expect(mockTransaction).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 when update targets missing id (P2025)', async () => {
+    mockTransaction.mockRejectedValue(
+      Object.assign(new Error('Not found'), { code: 'P2025' })
+    );
+    const body = {
+      date: '2026-04-10T00:00:00.000Z',
+      wonByCombo: false,
+      participants: [{ playerName: 'X', isWinner: true, isScrewed: false }],
+    };
+    const res: any = await patchGame(makeRequest(body), makeParams('missing'));
+    expect(res.status).toBe(404);
+  });
+
+  it('returns 429 when rate limited', async () => {
+    mockCheckRateLimit.mockReturnValue({
+      allowed: false,
+      retryAfterSeconds: 3,
+    });
+    const res: any = await patchGame(makeRequest({}), makeParams('g1'));
+    expect(res.status).toBe(429);
+    expect(mockTransaction).not.toHaveBeenCalled();
+  });
+});
+
+describe('DELETE /api/games/[id]', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockCheckRateLimit.mockReturnValue({ allowed: true });
+  });
+
+  it('deletes the game and returns 200', async () => {
+    mockGameDelete.mockResolvedValue({ id: 'g1' });
+    const res: any = await deleteGame(makeRequest(), makeParams('g1'));
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ok: true });
+    expect(mockGameDelete).toHaveBeenCalledWith({ where: { id: 'g1' } });
+  });
+
+  it('does NOT explicitly delete participants (cascade handles it)', async () => {
+    mockGameDelete.mockResolvedValue({ id: 'g1' });
+    await deleteGame(makeRequest(), makeParams('g1'));
+    expect(mockParticipantDeleteMany).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 when game missing (P2025)', async () => {
+    mockGameDelete.mockRejectedValue(
+      Object.assign(new Error('Not found'), { code: 'P2025' })
+    );
+    const res: any = await deleteGame(makeRequest(), makeParams('missing'));
+    expect(res.status).toBe(404);
+  });
+
+  it('returns 429 when rate limited', async () => {
+    mockCheckRateLimit.mockReturnValue({
+      allowed: false,
+      retryAfterSeconds: 8,
+    });
+    const res: any = await deleteGame(makeRequest(), makeParams('g1'));
+    expect(res.status).toBe(429);
+    expect(mockGameDelete).not.toHaveBeenCalled();
   });
 });
