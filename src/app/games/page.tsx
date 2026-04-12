@@ -303,7 +303,7 @@ export default function GamesPage() {
               <th className="py-2 pr-4">Date</th>
               <th className="py-2 pr-4">Winner</th>
               <th className="py-2 pr-4">Players</th>
-              <th className="py-2 pr-4">Notes</th>
+              <th className="py-2 pr-4 hidden sm:table-cell">Notes</th>
               <th className="py-2 pr-4">Actions</th>
             </tr>
           </thead>
@@ -323,7 +323,7 @@ export default function GamesPage() {
                         : '—'}
                     </td>
                     <td className="py-2 pr-4 text-sm text-foreground">{g.participants.length}</td>
-                    <td className="py-2 pr-4 text-sm text-muted truncate max-w-xs">
+                    <td className="py-2 pr-4 text-sm text-muted truncate max-w-xs hidden sm:table-cell">
                       {g.notes ?? ''}
                     </td>
                     <td className="py-2 pr-4 text-sm" onClick={(e) => e.stopPropagation()}>
