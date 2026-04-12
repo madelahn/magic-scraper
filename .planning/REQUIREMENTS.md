@@ -27,7 +27,7 @@ Requirements for Game Tracking & Polish milestone. Each maps to roadmap phases.
 - [x] **STAT-04**: User can view weekly game regularity (frequency of games over time)
 - [x] **STAT-05**: User can view "most likely to play" metric (highest % of games participated)
 - [x] **STAT-06**: User can view pie chart breakdowns (wins by player, games by deck)
-- [ ] **STAT-07**: Stats update reactively when new games are added
+- [x] **STAT-07**: Stats update reactively when new games are added
 - [x] **STAT-08**: Players/decks with no relevant data are excluded from charts
 
 ### Optimization
@@ -97,7 +97,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | STAT-04 | Phase 7 | Complete |
 | STAT-05 | Phase 7 | Complete |
 | STAT-06 | Phase 7 | Complete |
-| STAT-07 | Phase 7 | Pending |
+| STAT-07 | Phase 7 | Complete |
 | STAT-08 | Phase 7 | Complete |
 | OPT-01 | Phase 6 | Pending |
 | OPT-02 | Phase 9 | Pending |
