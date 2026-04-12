@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import dynamic from 'next/dynamic';
 import { ChevronDown } from 'lucide-react';
 import type { Game } from '@/app/games/page';
@@ -163,8 +163,8 @@ export default function StatsPage() {
   const gamesByDeck = useMemo(() => computeGamesByDeckPie(games), [games]);
   const playerRadar = useMemo(() => computePlayerRadar(games), [games]);
 
-  // ---------- Chart chrome tokens (adaptive to light/dark) ----------
-  const chartTokens = useMemo(() => {
+  // ---------- Chart chrome tokens (reactive to light/dark toggle) ----------
+  const readTokens = useCallback(() => {
     if (typeof window === 'undefined') {
       return { foreground: '#18181b', muted: '#71717a', border: '#e4e4e7', surface: '#f4f4f5' };
     }
@@ -176,6 +176,14 @@ export default function StatsPage() {
       surface: style.getPropertyValue('--surface').trim() || '#f4f4f5',
     };
   }, []);
+  const [chartTokens, setChartTokens] = useState(readTokens);
+
+  useEffect(() => {
+    setChartTokens(readTokens());
+    const observer = new MutationObserver(() => setChartTokens(readTokens()));
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+    return () => observer.disconnect();
+  }, [readTokens]);
 
   // ---------- Unique player names for bump chart ----------
   const bumpPlayers = useMemo(() => {
