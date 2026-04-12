@@ -16,6 +16,7 @@ interface Game {
   id: string;
   date: string;
   wonByCombo: boolean;
+  isImported: boolean;
   notes: string | null;
   createdAt: string;
   participants: Participant[];
