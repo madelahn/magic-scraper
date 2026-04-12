@@ -77,6 +77,8 @@ export default function DeckWinRateBar({ data, chartTokens }: Props) {
               border: `1px solid ${chartTokens.border}`,
               color: chartTokens.foreground,
             }}
+            itemStyle={{ color: chartTokens.foreground }}
+            labelStyle={{ color: chartTokens.foreground }}
           />
         </BarChart>
       </ResponsiveContainer>

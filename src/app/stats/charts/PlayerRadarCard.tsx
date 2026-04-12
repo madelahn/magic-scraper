@@ -72,6 +72,7 @@ export default function PlayerRadarCard({ data, chartTokens }: Props) {
       Screwed: d.screwed,
       "Won by Combo": d.wonByCombo,
       totalGames: d.totalGames,
+      nonImportedPlayed: d.nonImportedPlayed,
     };
   }
 
@@ -117,8 +118,11 @@ export default function PlayerRadarCard({ data, chartTokens }: Props) {
                   const raw = rawByPlayer[playerName]?.[axis] ?? 0;
                   const played = rawByPlayer[playerName]?.["Played"] ?? 0;
                   const totalGames = rawByPlayer[playerName]?.["totalGames"] ?? 1;
+                  const nonImported = rawByPlayer[playerName]?.["nonImportedPlayed"] ?? 0;
                   const pct = axis === "Played"
                     ? Math.round((raw / totalGames) * 100)
+                    : axis === "Won by Combo"
+                    ? nonImported > 0 ? Math.round((raw / nonImported) * 100) : 0
                     : played > 0 ? Math.round((raw / played) * 100) : 0;
                   return (
                     <div
